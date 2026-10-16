@@ -85,7 +85,7 @@ uv run pytest
 ## Licence
 
 Copyright (c) 2026 Vasco Craveiro Costa. Released under
-[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) (full text in [LICENSE](LICENSE)):
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) (full text in [LICENSE](LICENSE), copyright and history in [NOTICE](NOTICE)):
 
 - **Allowed:** using, sharing and adapting it for non-commercial purposes, with attribution.
 - **Required:** adaptations must be distributed under the same licence.
