@@ -69,7 +69,8 @@ def test_ha_mode_has_no_login_and_prefixes_urls(ha_app):
     app, _ = ha_app
     c = TestClient(app, client=PROXY)
     page = c.get("/", headers=USER).text
-    assert "Vasco" in page and "Log out" not in page
+    assert "Vasco" not in page and "Log out" not in page and "Account" not in page
+    assert "Configuration tab" in page
     assert 'href="/api/hassio_ingress/TOKEN/device/10.0.0.5"' in page
     assert 'src="/api/hassio_ingress/TOKEN/static/app.js"' in page
     assert "2 found" in page and "Home Assistant" in page
@@ -101,3 +102,14 @@ def test_ha_password_override_wins_over_integration(ha_app):
     f.set_password("10.0.0.5", "override")
     assert f.entry("10.0.0.5").password == "override" and f.entry("10.0.0.5").source == "file"
     assert "http://10.0.0.5 override" in (tmp / "devices.txt").read_text()
+
+
+def test_ha_overview_shows_the_deploy_key(tmp_path):
+    (tmp_path / "options.json").write_text(json.dumps({"snapshot_remote": "git@github.com:me/cfg.git"}))
+    (tmp_path / "deploy_key").write_text("PRIVATE")
+    (tmp_path / "deploy_key.pub").write_text("ssh-ed25519 AAAATEST shelly-manager@home-assistant\n")
+    s = Settings.from_ha_options(tmp_path / "options.json", tmp_path, _entries(tmp_path))
+    app = app_mod.create_app(s, start_poller=False)
+    page = TestClient(app, client=PROXY).get("/", headers=USER).text
+    assert "ssh-ed25519 AAAATEST" in page and "PRIVATE" not in page
+    assert "Allow write access" in page

@@ -51,9 +51,7 @@ input[type=text], input[type=password] { min-height: 40px; padding: 8px; font: i
 <a class="skip" href="#main">Skip to content</a>
 <header>
   <nav aria-label="Main navigation"><a href="{{ base }}/">Shelly Manager</a></nav>
-  {% if user and ha_mode %}
-  <span>{{ user }}</span>
-  {% elif user %}
+  {% if user and not ha_mode %}
   <div class="row" style="margin:0">
   <a href="{{ base }}/account" style="font-weight:400">Account</a>
   <form class="inline" method="post" action="{{ base }}/logout">

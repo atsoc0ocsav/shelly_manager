@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Inside Home Assistant, the header no longer shows the user name.
+- The overview shows the backup deploy key and how to add it, and explains how to turn
+  the backup on when it is off.
+
 ## 0.4.0
 
 - The overview and device pages update by themselves: polls run in the background and

@@ -19,6 +19,15 @@
   {% if push.ok is none %}<span class="badge">nothing pushed yet</span>
   {% elif push.ok %}<span class="badge ok">{{ push.message }}</span> checked {{ push.last_attempt }}
   {% else %}<span class="badge err">last push failed</span> {{ push.last_attempt }}: {{ push.message }}{% endif %}</p>
+{% if deploy_key %}
+<details {{ "open" if push.ok is sameas false }}><summary>Deploy key for the backup repository</summary>
+  <p>Add this public key to the repository as a deploy key <strong>with write access</strong>
+     (GitHub: repository Settings, Deploy keys, Add deploy key, tick "Allow write access").</p>
+  <pre>{{ deploy_key }}</pre>
+</details>
+{% endif %}
+{% elif ha_mode %}
+<p><span class="badge warn">config backup off</span> History is kept inside the app only. To push it to a private git repository, set <strong>Config backup repository</strong> on the app's Configuration tab and restart the app.</p>
 {% else %}
 <p><span class="badge warn">config backup off</span> Set <code>SM_SNAPSHOT_REMOTE</code> to push snapshots to a private git repo.</p>
 {% endif %}

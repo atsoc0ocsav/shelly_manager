@@ -15,6 +15,13 @@ that is, open the device's **Stored password** page. A password saved there over
 integration's for that device until you remove the line from `/data/devices.txt`. If a
 device password changes, prefer re-authenticating it in the Shelly integration.
 
+## Where the history is kept
+
+Each poll writes one JSON file per device (config, schedules, webhooks, KVS and script
+code) into a git repository inside the app's private data folder, `/data/snapshots`. A
+commit is made only when something changed. Home Assistant includes that folder in its
+backups of the app, so the history survives a restore even without the git backup below.
+
 ## Options
 
 | Option | Default | Meaning |
@@ -28,9 +35,15 @@ device password changes, prefer re-authenticating it in the Shelly integration.
 
 1. Create an **empty private** repository.
 2. Set **Config backup repository** to its SSH URL, e.g. `git@github.com:you/shelly-configs.git`,
-   and restart the app.
-3. The app log prints a public key. Add it to the repository as a deploy key **with write
-   access**.
+   save, and restart the app.
+3. On first start with a repository set, the app creates its own SSH key pair in `/data`.
+   Its public half is shown on the overview page (and in the app log). Add it to the
+   repository as a deploy key **with write access** (GitHub: Settings, Deploy keys).
+4. Wait for the next poll or press **Poll all now**; the overview shows the push result.
+
+Only SSH URLs are supported, with this deploy key; HTTPS URLs and personal access tokens
+are not. A deploy key reaches only the one repository it is added to. The server's host key
+is trusted on first connection and stored in `/data/known_hosts`.
 
 The overview shows whether the last push worked. Failed pushes are retried on every poll.
 Snapshots never contain WiFi passwords (devices do not return them), but they do contain

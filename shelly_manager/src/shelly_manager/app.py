@@ -156,7 +156,10 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
     async def overview(request: Request, user: str = Depends(current_user)):
         f = fleet(request)
         rows = [(host, f.states.get(host)) for host in sorted(f.entries, key=lambda h: tuple(int(p) if p.isdigit() else 0 for p in h.split(".")))]
-        return render(request, "overview.html", rows=rows, push=f.store.push_status, entries=f.entries)
+        pub = settings.git_ssh_key_file.with_suffix(".pub") if settings.git_ssh_key_file else None
+        deploy_key = pub.read_text().strip() if pub and pub.is_file() else None
+        return render(request, "overview.html", rows=rows, push=f.store.push_status, entries=f.entries,
+                      deploy_key=deploy_key)
 
     @app.get("/account", response_class=HTMLResponse, dependencies=[Depends(standalone_only)])
     async def account(request: Request, user: str = Depends(current_user)):
