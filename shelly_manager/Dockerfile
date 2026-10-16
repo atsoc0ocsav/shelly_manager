@@ -19,4 +19,4 @@ CMD ["/run.sh"]
 LABEL \
     org.opencontainers.image.title="Home Assistant App: Shelly Manager" \
     org.opencontainers.image.source="https://github.com/atsoc0ocsav/shelly_manager" \
-    org.opencontainers.image.licenses="MIT"
+    org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"

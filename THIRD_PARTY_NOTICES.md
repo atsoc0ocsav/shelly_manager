@@ -1,6 +1,6 @@
 # Third-party notices
 
-Shelly Manager is licensed under the MIT licence (see [LICENSE](LICENSE)). It does not
+Shelly Manager is licensed under CC BY-NC-SA 4.0 (see [LICENSE](LICENSE)); that licence covers only this project's own code. It does not
 include third-party source code in this repository. The components below are downloaded
 when the app is built and are distributed under their own licences.
 

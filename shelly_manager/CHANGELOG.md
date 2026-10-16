@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Relicensed from MIT to CC BY-NC-SA 4.0 (non-commercial, share-alike).
+
 ## 0.3.0
 
 - Packaged as a Home Assistant app with Ingress: Home Assistant handles login, no port is published.

@@ -1,9 +1,9 @@
 [project]
 name = "shelly-manager"
-version = "0.3.0"
+version = "0.3.1"
 description = "Inventory, config history, settings editor and firmware updates for Shelly Gen2+ devices"
 requires-python = ">=3.12,<3.14"
-license = "MIT"
+license = "CC-BY-NC-SA-4.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Vasco Craveiro Costa" }]
 dependencies = [

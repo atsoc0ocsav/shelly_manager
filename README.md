@@ -7,6 +7,8 @@ need no reconfiguration and nothing goes through the Shelly cloud.
 
 It also runs standalone (outside Home Assistant) with its own login.
 
+Non-commercial use only: see [Licence](#licence).
+
 ## Features
 
 - **Discovery from Home Assistant**: Gen2+ devices and their passwords are read from the
@@ -82,10 +84,19 @@ uv run pytest
 
 ## Licence
 
-Shelly Manager is released under the [MIT licence](LICENSE). Copyright (c) 2026 Vasco Craveiro Costa.
+Copyright (c) 2026 Vasco Craveiro Costa. Released under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) (full text in [LICENSE](LICENSE)):
+
+- **Allowed:** using, sharing and adapting it for non-commercial purposes, with attribution.
+- **Required:** adaptations must be distributed under the same licence.
+- **Not allowed:** commercial use, including selling it or paid services built on it,
+  without written permission. Ask if you have a commercial use in mind.
+
+This is a source-available licence, not an OSI open-source licence. The initial public
+commit (`dfc358b`) was published under MIT; every later version is CC BY-NC-SA 4.0 only.
 
 The app is built from third-party components (Python packages, the Home Assistant base
-image) under their own permissive licences; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+image) under their own licences; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Shelly is a trademark of Shelly Group. This project is not affiliated with, endorsed or
 sponsored by Shelly Group or the Home Assistant project.
