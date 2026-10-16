@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ component }} · {{ st.name }}{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb"><ol style="list-style:none;padding:0;display:flex;gap:8px"><li><a href="{{ base }}/">Devices</a> /</li><li><a href="{{ base }}/device/{{ st.host }}">{{ st.name }}</a> /</li><li aria-current="page">{{ component }}</li></ol></nav>
+<h1>Edit <code>{{ component }}</code> on {{ st.name }}</h1>
+<p>Edit the JSON and preview. Only changed fields are sent to the device. The device's current value is re-read before every preview and apply.</p>
+{% if error %}<p class="alert err" role="alert">{{ error }}</p>{% endif %}
+{% if diff %}
+<h2>Change preview</h2>
+<pre aria-label="Diff">{% for line in diff.splitlines() %}<span class="{{ 'diff-add' if line.startswith('+') else 'diff-del' if line.startswith('-') else '' }}">{{ line }}</span>
+{% endfor %}</pre>
+{% endif %}
+<form method="post" action="{{ base }}/device/{{ st.host }}/edit/{{ component }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="proposed">Configuration (JSON)</label>
+  <textarea id="proposed" name="proposed" spellcheck="false">{{ proposed }}</textarea>
+  <div class="row">
+    <button class="btn" type="submit" name="action" value="preview">Preview change</button>
+    {% if diff %}<button class="btn btn-primary" type="submit" name="action" value="apply">Apply to device</button>{% endif %}
+    <a href="{{ base }}/device/{{ st.host }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

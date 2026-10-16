@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ st.name }} · Shelly Manager{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb"><ol style="list-style:none;padding:0;display:flex;gap:8px"><li><a href="{{ base }}/">Devices</a> /</li><li aria-current="page">{{ st.name }}</li></ol></nav>
+<h1>{{ st.name }}</h1>
+{% set upd = available_updates(st) %}
+<table>
+  <tr><th scope="row">IP</th><td>{{ st.host }}</td><th scope="row">ID</th><td>{{ st.info.id }}</td></tr>
+  <tr><th scope="row">Model</th><td>{{ st.info.model }} ({{ st.info.app }}, gen {{ st.info.gen }})</td><th scope="row">MAC</th><td>{{ st.info.mac }}</td></tr>
+  <tr><th scope="row">Firmware</th><td>{{ st.info.ver }}</td><th scope="row">Profile</th><td>{{ st.info.profile or "-" }}</td></tr>
+  <tr><th scope="row">Uptime</th><td>{{ (st.status.sys.uptime // 3600) if st.status.sys else "?" }} h</td><th scope="row">Last poll (UTC)</th><td>{{ st.polled_at }}</td></tr>
+</table>
+
+<div class="row">
+  <form class="inline" method="post" action="{{ base }}/device/{{ st.host }}/poll">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">Poll now</button>
+  </form>
+  <a class="btn" href="{{ base }}/device/{{ st.host }}/credentials" style="text-decoration:none;display:inline-flex;align-items:center">Stored password</a>
+  <form class="inline" method="post" action="{{ base }}/device/{{ st.host }}/reboot" data-confirm="Reboot {{ st.name }}?">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-danger" type="submit">Reboot</button>
+  </form>
+</div>
+
+<h2>Firmware</h2>
+<p>Running <strong>{{ st.info.ver }}</strong>.
+{% if not upd.stable %}This is the latest <strong>stable</strong> release the device knows of: Shelly offers only versions newer than the one installed, so there is no stable update to pick.{% endif %}</p>
+<form method="post" action="{{ base }}/device/{{ st.host }}/update" data-confirm="Start the firmware update on {{ st.name }}? The device reboots when done.">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset style="border:1px solid var(--c-border);border-radius:8px;padding:16px;background:#fff">
+    <legend>Update to</legend>
+    {% for stage, ver in upd | dictsort %}
+    <p><label style="font-weight:400"><input type="radio" name="target" value="{{ stage }}" {{ 'checked' if loop.first }}> {{ stage }} <strong>{{ ver }}</strong>{% if stage == 'beta' %} (pre-release){% endif %}</label></p>
+    {% endfor %}
+    <p><label style="font-weight:400"><input type="radio" name="target" value="url" {{ 'checked' if not upd }}> A specific firmware image (URL)</label>
+       <input type="text" name="url" aria-label="Firmware image URL" placeholder="https://...shelly.cloud/.../firmware.zip" style="max-width:640px">
+       <br><small>Use this to install a version Shelly no longer offers, or to downgrade.{% if not allow_any_firmware_url %} Only *.shelly.cloud hosts are accepted.{% endif %} The image must be for this model ({{ st.info.app }}).</small></p>
+    <button class="btn btn-primary" type="submit">Start update</button>
+  </fieldset>
+</form>
+
+<h2>Components</h2>
+<table>
+  <thead><tr><th scope="col">Component</th><th scope="col">Name</th><th scope="col">Enabled</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+  <tbody>
+  {% for key, cfg in st.snapshot.config | dictsort %}
+  <tr><td><code>{{ key }}</code></td><td>{{ cfg.name if cfg is mapping and cfg.name else "" }}</td>
+      <td>{{ cfg.enable if cfg is mapping and cfg.enable is defined else "" }}</td>
+      <td><a href="{{ base }}/device/{{ st.host }}/edit/{{ key }}">Edit</a></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Config history</h2>
+{% if history %}
+<table>
+  <thead><tr><th scope="col">Revision</th><th scope="col">When</th><th scope="col">Reason</th></tr></thead>
+  <tbody>{% for r in history %}<tr><td><a href="{{ base }}/device/{{ st.host }}/rev/{{ r.rev }}"><code>{{ r.rev }}</code></a></td><td>{{ r.date }}</td><td>{{ r.subject }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p>No snapshots yet.</p>{% endif %}
+
+<h2>Full snapshot</h2>
+<p>Config, schedules, webhooks, KVS and script code as stored. WiFi passwords are never returned by the device and are not in here.</p>
+<details><summary>Show JSON</summary><pre>{{ config_json }}</pre></details>
+{% endblock %}

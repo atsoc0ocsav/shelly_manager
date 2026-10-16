@@ -1,0 +1,11 @@
+research/raw/
+__pycache__/
+.venv/
+.pytest_cache/
+*.pyc
+.env
+data/
+# local secrets; named so templates and code are never caught by it
+*.secret
+*.hash
+cred_*.txt

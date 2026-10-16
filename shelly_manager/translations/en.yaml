@@ -1,0 +1,13 @@
+configuration:
+  use_ha_shelly_integration:
+    name: Use the Home Assistant Shelly integration
+    description: Discover Gen2+ devices and their passwords from the Shelly integration. Devices added in the app override these.
+  snapshot_remote:
+    name: Config backup repository
+    description: SSH URL of a private git repository, e.g. git@github.com:you/shelly-configs.git. Leave empty to keep history only inside the app. The app log shows the deploy key to add with write access.
+  poll_interval_minutes:
+    name: Poll interval (minutes)
+    description: How often every device is read and its configuration snapshotted.
+  allow_any_firmware_url:
+    name: Allow firmware URLs outside shelly.cloud
+    description: Off by default. A custom image is flashed as-is, so only enable this for images you trust.

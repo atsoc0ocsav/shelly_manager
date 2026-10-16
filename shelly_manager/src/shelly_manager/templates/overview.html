@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Devices</h1>
+<div class="row">
+  <form class="inline" method="post" action="{{ base }}/poll">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">Poll all now</button>
+  </form>
+  <form class="inline" method="post" action="{{ base }}/update-all"
+        data-confirm="Start the stable firmware update on every device that has one? Each device reboots when done.">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-primary" type="submit">Update all to stable</button>
+  </form>
+</div>
+{% if push.configured %}
+<p>Config backup to <code>{{ push.remote }}</code>:
+  {% if push.ok is none %}<span class="badge">nothing pushed yet</span>
+  {% elif push.ok %}<span class="badge ok">{{ push.message }}</span> checked {{ push.last_attempt }}
+  {% else %}<span class="badge err">last push failed</span> {{ push.last_attempt }}: {{ push.message }}{% endif %}</p>
+{% else %}
+<p><span class="badge warn">config backup off</span> Set <code>SM_SNAPSHOT_REMOTE</code> to push snapshots to a private git repo.</p>
+{% endif %}
+{% if ha is not none %}
+<p>Devices from the Home Assistant Shelly integration:
+  {% if ha.error %}<span class="badge err">not read</span> {{ ha.error }}
+  {% else %}<span class="badge ok">{{ ha.entries | length }} found</span>{% endif %}
+  {% if ha.skipped %}<details style="display:inline"><summary>{{ ha.skipped | length }} skipped</summary><ul>{% for s in ha.skipped %}<li>{{ s }}</li>{% endfor %}</ul></details>{% endif %}
+</p>
+{% endif %}
+{% if not rows %}
+<p class="alert">No devices configured. Add <code>URL password</code> lines to the devices file and restart.</p>
+{% else %}
+<table>
+  <thead><tr><th scope="col">IP</th><th scope="col">Name</th><th scope="col">Model</th><th scope="col">Gen</th><th scope="col">Firmware</th><th scope="col">Update</th><th scope="col">Status</th><th scope="col">Last poll (UTC)</th><th scope="col">Credentials</th></tr></thead>
+  <tbody>
+  {% for host, st in rows %}
+  <tr>
+    <td>{% if st and st.ok %}<a href="{{ base }}/device/{{ host }}">{{ host }}</a>{% else %}{{ host }}{% endif %}</td>
+    {% if st and st.ok %}
+      {% set upd = available_updates(st) %}
+      <td>{{ st.name }}</td><td>{{ st.info.model }}<br><small>{{ st.info.app }}</small></td><td>{{ st.info.gen }}</td>
+      <td>{{ st.info.ver }}</td>
+      <td>{% if upd.stable %}<span class="badge warn">stable {{ upd.stable }}</span>{% endif %}
+          {% if upd.beta %}<span class="badge">beta {{ upd.beta }}</span>{% endif %}
+          {% if not upd.stable %}<span class="badge ok">latest stable</span>{% endif %}</td>
+      <td>{% if st.status.sys and st.status.sys.restart_required %}<span class="badge warn">restart required</span>{% else %}<span class="badge ok">online</span>{% endif %}</td>
+      <td>{{ st.polled_at[11:19] }}</td>
+    {% elif st %}
+      <td colspan="6"><span class="badge err">{{ "wrong password" if "401" in (st.error or "") else "unreachable" }}</span> {{ st.error }}
+          <a href="{{ base }}/device/{{ host }}/credentials">Update stored password</a></td><td>{{ st.polled_at[11:19] }}</td>
+    {% else %}
+      <td colspan="7">not polled yet</td>
+    {% endif %}
+    <td>{{ "Home Assistant" if entries[host].source == "ha" else "this app" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

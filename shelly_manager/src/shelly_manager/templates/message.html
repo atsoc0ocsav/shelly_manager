@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="alert" role="status">{{ message }}</p>
+<div class="row">
+  {% if offer_reboot %}
+  <form class="inline" method="post" action="{{ base }}/device/{{ host }}/reboot">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-primary" type="submit">Reboot now</button>
+  </form>
+  {% endif %}
+  <a href="{{ base }}{{ back or '/' }}">Back</a>
+</div>
+{% endblock %}

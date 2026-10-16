@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ rev }} · {{ st.name }}{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb"><ol style="list-style:none;padding:0;display:flex;gap:8px"><li><a href="{{ base }}/">Devices</a> /</li><li><a href="{{ base }}/device/{{ st.host }}">{{ st.name }}</a> /</li><li aria-current="page">{{ rev }}</li></ol></nav>
+<h1>Revision <code>{{ rev }}</code></h1>
+{% if diff.strip() %}
+<pre>{% for line in diff.splitlines() %}<span class="{{ 'diff-add' if line.startswith('+') else 'diff-del' if line.startswith('-') else '' }}">{{ line }}</span>
+{% endfor %}</pre>
+{% else %}<p>No textual changes in this revision.</p>{% endif %}
+{% endblock %}

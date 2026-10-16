@@ -1,0 +1,21 @@
+[Unit]
+Description=Shelly Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=shelly
+Group=shelly
+WorkingDirectory=/opt/shelly-manager
+EnvironmentFile=/etc/shelly-manager/env
+ExecStart=/opt/shelly-manager/.venv/bin/shelly-manager serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/shelly-manager
+
+[Install]
+WantedBy=multi-user.target
