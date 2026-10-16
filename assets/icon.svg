@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Shelly Manager icon. Original artwork, CC BY-NC-SA 4.0. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E88E5"/>
+      <stop offset="1" stop-color="#0D47A1"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <!-- circular "sync / history" arrow -->
+  <path d="M256 104a152 152 0 1 1-131.6 76" fill="none" stroke="#fff" stroke-opacity=".9"
+        stroke-width="34" stroke-linecap="round"/>
+  <path d="M152.4 131.5L91.5 161.0L157.3 199.0z" fill="#fff" fill-opacity=".9"/>
+  <!-- lightning bolt -->
+  <path d="M282 150 190 282h62l-26 98 98-140h-64z" fill="#FFC107" stroke="#fff"
+        stroke-width="10" stroke-linejoin="round"/>
+</svg>

@@ -80,6 +80,10 @@ uv sync
 uv run pytest
 ```
 
+`assets/` holds the SVG sources of `shelly_manager/icon.png` (128 x 128) and
+`shelly_manager/logo.png` (500 x 200); re-render with
+`rsvg-convert -w 128 -h 128 assets/icon.svg -o shelly_manager/icon.png`.
+
 `research/` holds the read-only API survey scripts used to design the tool.
 
 ## Licence

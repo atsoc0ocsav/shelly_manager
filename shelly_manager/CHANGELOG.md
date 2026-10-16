@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Added the app icon and logo shown in the Home Assistant app store and app page.
+
 ## 0.3.1
 
 - Relicensed from MIT to CC BY-NC-SA 4.0 (non-commercial, share-alike).

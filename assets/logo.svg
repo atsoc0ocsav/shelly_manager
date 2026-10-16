@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 200">
+  <!-- Shelly Manager logo. Original artwork, CC BY-NC-SA 4.0. -->
+  <image href="icon.svg" x="10" y="20" width="160" height="160"/>
+  <text x="186" y="94" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="54" font-weight="700" fill="#1E88E5">Shelly</text>
+  <text x="186" y="152" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="54" font-weight="400" fill="#1E88E5">Manager</text>
+</svg>
