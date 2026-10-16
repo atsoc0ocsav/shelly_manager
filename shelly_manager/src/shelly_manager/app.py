@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -36,6 +36,10 @@ def _available_updates(st) -> dict:
 
 
 templates.env.globals["available_updates"] = _available_updates
+
+# Seconds after the action at which the device is re-read, so the UI picks up the result.
+AFTER_UPDATE_POLLS = (30, 90, 180, 300)
+AFTER_REBOOT_POLLS = (15, 45)
 
 
 def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
@@ -102,6 +106,8 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         else:
             ctx.setdefault("user", request.session.get("user"))
         ctx["base"] = base(request)
+        ctx["version"] = request.app.state.fleet.version
+        ctx["busy"] = request.app.state.fleet.busy
         ctx["ha_mode"] = settings.ha_mode
         ctx["ha"] = request.app.state.fleet.ha
         return templates.TemplateResponse(request, name, ctx)
@@ -115,6 +121,13 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         if st is None:
             raise HTTPException(409, "device not polled yet")
         return st
+
+    @app.get("/api/state")
+    async def api_state(request: Request, user: str = Depends(current_user)):
+        """Change feed for the live UI: pages refetch themselves when ``version`` moves."""
+        f = fleet(request)
+        return JSONResponse({"version": f.version, "busy": sorted(f.busy)},
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/healthz", response_class=PlainTextResponse)
     async def healthz():
@@ -191,7 +204,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
 
     @app.post("/poll", dependencies=[Depends(require_csrf)])
     async def poll_all(request: Request):
-        await fleet(request).poll_all("manual poll")
+        fleet(request).start_poll_all("manual poll")  # results stream into the page
         return RedirectResponse(url(request, "/"), status_code=303)
 
     @app.post("/update-all", dependencies=[Depends(require_csrf)])
@@ -203,11 +216,13 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
                 try:
                     await ops.firmware_update(f.entry(host), "stable")
                     started.append(st.name)
+                    f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
                 except (ShellyError, ShellyUnreachable) as e:
                     log.warning("update failed: %s", e)
         return render(request, "message.html", title="Firmware updates started",
                       message=f"Stable update started on {len(started)} device(s): {', '.join(started) or 'none'}. "
-                              "Devices reboot when done; poll again in a few minutes.")
+                              "Devices reboot when done. The device list refreshes by itself as they come back.",
+                      back="/")
 
     @app.get("/device/{host}", response_class=HTMLResponse)
     async def device(request: Request, host: str, user: str = Depends(current_user)):
@@ -220,7 +235,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
 
     @app.post("/device/{host}/poll", dependencies=[Depends(require_csrf)])
     async def poll_one(request: Request, host: str):
-        await fleet(request).poll_one(host, "manual poll")
+        fleet(request).start_poll_one(host, "manual poll")  # the page refreshes when it lands
         return RedirectResponse(url(request, f"/device/{host}"), status_code=303)
 
     @app.get("/device/{host}/rev/{rev}", response_class=HTMLResponse)
@@ -251,8 +266,10 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         except (ShellyError, ShellyUnreachable, ValueError) as e:
             return render(request, "message.html", title="Update failed", message=str(e), back=f"/device/{host}")
         log.info("firmware update on %s: %s", st.name, label)
+        f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
         return render(request, "message.html", title="Firmware update started",
-                      message=f"{st.name}: updating to {label}. The device reboots when done.",
+                      message=f"{st.name}: updating to {label}. The device reboots when done; "
+                              "its page shows the new version by itself once it is back.",
                       back=f"/device/{host}")
 
     @app.post("/device/{host}/reboot", dependencies=[Depends(require_csrf)])
@@ -263,6 +280,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
             await ops.reboot(f.entry(host))
         except (ShellyError, ShellyUnreachable) as e:
             return render(request, "message.html", title="Reboot failed", message=str(e))
+        f.start_poll_one(host, "after reboot", AFTER_REBOOT_POLLS)
         return render(request, "message.html", title="Rebooting", message=f"{st.name} is rebooting.",
                       back=f"/device/{host}")
 

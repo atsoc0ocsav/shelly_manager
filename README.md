@@ -14,7 +14,7 @@ Non-commercial use only: see [Licence](#licence).
 - **Discovery from Home Assistant**: Gen2+ devices and their passwords are read from the
   Shelly integration you already have configured. Devices can also be added by hand.
 - **Overview**: model, generation, firmware, available stable and beta updates, restart
-  flag and last poll for every device.
+  flag and last poll for every device. Pages update live as devices are polled.
 - **Configuration history**: every poll stores the device config, schedules, webhooks, KVS
   and script code in a local git repository, one JSON file per device. Only real changes are
   committed. Each device page shows its history and the diff of every revision.

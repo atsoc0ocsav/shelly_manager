@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Devices</h1>
+<div id="live-overview" data-live>
+<p id="live-status" aria-live="polite">{% if "*" in busy %}<span class="spinner" aria-hidden="true"></span> Polling all devices; rows update as each one answers.{% elif busy %}<span class="spinner" aria-hidden="true"></span> Polling {{ busy | length }} device(s).{% else %}This page updates by itself.{% endif %}</p>
 <div class="row">
   <form class="inline" method="post" action="{{ base }}/poll">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="btn" type="submit">Poll all now</button>
+    <button class="btn" type="submit" {{ "disabled" if "*" in busy }}>{{ "Polling..." if "*" in busy else "Poll all now" }}</button>
   </form>
   <form class="inline" method="post" action="{{ base }}/update-all"
         data-confirm="Start the stable firmware update on every device that has one? Each device reboots when done.">
@@ -35,7 +37,7 @@
   <tbody>
   {% for host, st in rows %}
   <tr>
-    <td>{% if st and st.ok %}<a href="{{ base }}/device/{{ host }}">{{ host }}</a>{% else %}{{ host }}{% endif %}</td>
+    <td>{% if st and st.ok %}<a href="{{ base }}/device/{{ host }}">{{ host }}</a>{% else %}{{ host }}{% endif %}{% if host in busy %} <span class="spinner" role="img" aria-label="polling"></span>{% endif %}</td>
     {% if st and st.ok %}
       {% set upd = available_updates(st) %}
       <td>{{ st.name }}</td><td>{{ st.info.model }}<br><small>{{ st.info.app }}</small></td><td>{{ st.info.gen }}</td>
@@ -57,4 +59,5 @@
   </tbody>
 </table>
 {% endif %}
+</div>
 {% endblock %}
