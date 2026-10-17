@@ -60,7 +60,7 @@ templates.env.filters["ipkey"] = _ip_key
 templates.env.filters["verkey"] = _version_key
 
 # Seconds after the action at which the device is re-read, so the UI picks up the result.
-AFTER_UPDATE_POLLS = (30, 90, 180, 300)
+AFTER_UPDATE_POLLS = (30, 90, 180, 300, 400)  # the last one lands after fleet.NO_RESTART_S
 AFTER_REBOOT_POLLS = (15, 45)
 
 
@@ -131,6 +131,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         ctx["version"] = request.app.state.fleet.version
         ctx["busy"] = request.app.state.fleet.busy
         ctx["updating"] = request.app.state.fleet.updating
+        ctx["update_results"] = request.app.state.fleet.update_results
         ctx["ha_mode"] = settings.ha_mode
         ctx["ha"] = request.app.state.fleet.ha
         return templates.TemplateResponse(request, name, ctx)
@@ -343,6 +344,14 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
                   "failed": "Update failed"}
         return render(request, "message.html", title=titles[outcome], message=f"{st.name}: {detail}",
                       back=f"/device/{host}")
+
+    @app.post("/device/{host}/update/clear", dependencies=[Depends(require_csrf)])
+    async def update_clear(request: Request, host: str):
+        f = fleet(request)
+        state_or_404(f, host)
+        f.clear_update(host)
+        f.start_poll_one(host, "manual poll")
+        return RedirectResponse(url(request, f"/device/{host}"), status_code=303)
 
     @app.post("/device/{host}/reboot", dependencies=[Depends(require_csrf)])
     async def do_reboot(request: Request, host: str):

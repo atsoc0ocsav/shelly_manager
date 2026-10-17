@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.3
+
+- A failed firmware update no longer leaves the device stuck on "Updating to ...". Shelly
+  reports update errors only as live events, so the app decides from its polls: a new
+  version is a success; a restart on the old version, or no restart within 6 minutes, is a
+  failure. The device page shows the result; the overview flags failures.
+- **It is not updating, stop waiting** on the device page clears the marker at once.
+
 ## 0.5.2
 
 - An update a device reports as already running (Shelly error -106) is now shown as

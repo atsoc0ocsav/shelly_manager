@@ -328,3 +328,65 @@ def test_update_all_reports_each_device(client, monkeypatch):
     monkeypatch.setattr(app_mod.ops, "firmware_update", mixed)
     r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.5", "10.0.0.6"]})
     assert "1 of 2" in r.text and ">started<" in r.text and ">in progress<" in r.text
+
+
+def _poll_result(st, ver, uptime, ok=True):
+    from shelly_manager.collector import DeviceState
+    return DeviceState(host=st.host, url=st.url, ok=ok, polled_at="2026-10-17T15:00:00+00:00",
+                       info=dict(st.info, ver=ver), status={"sys": {"uptime": uptime}},
+                       updates=st.updates, methods=[], snapshot=st.snapshot)
+
+
+def test_update_failure_detected_by_restart_on_old_version(client):
+    c, st, _ = client
+    f = c.app.state.fleet
+    f.mark_updating("10.0.0.5", "stable 2.0.1")          # uptime 7200 in the fixture
+    f._record(_poll_result(st, "1.7.5", 7300), "poll")   # still running: no verdict
+    assert "10.0.0.5" in f.updating
+    f._record(_poll_result(st, "1.7.5", 40), "poll")     # rebooted, same version
+    assert "10.0.0.5" not in f.updating
+    r = f.update_results["10.0.0.5"]
+    assert not r.ok and "did not install" in r.message
+    login(c)
+    assert "update failed" in c.get("/").text
+    page = c.get("/device/10.0.0.5").text
+    assert "Last firmware update" in page and "failed" in page and "Start update" in page
+
+
+def test_update_failure_detected_when_no_restart(client, monkeypatch):
+    import shelly_manager.fleet as fleet_mod
+    c, st, _ = client
+    f = c.app.state.fleet
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    monkeypatch.setattr(fleet_mod.time, "monotonic", lambda: f.updating["10.0.0.5"].started + fleet_mod.NO_RESTART_S + 1)
+    f._record(_poll_result(st, "1.7.5", 7700), "poll")
+    assert "most likely failed" in f.update_results["10.0.0.5"].message
+
+
+def test_update_success_recorded(client):
+    c, st, _ = client
+    f = c.app.state.fleet
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    f._record(_poll_result(st, "2.0.1", 30), "poll")
+    assert f.update_results["10.0.0.5"].ok and "1.7.5 to 2.0.1" in f.update_results["10.0.0.5"].message
+
+
+def test_unreachable_while_rebooting_keeps_waiting(client):
+    c, st, _ = client
+    f = c.app.state.fleet
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    f._record(_poll_result(st, "", 0, ok=False), "poll")
+    assert "10.0.0.5" in f.updating
+
+
+def test_user_can_stop_waiting(client, monkeypatch):
+    c, st, _ = client
+    token = login(c)
+    f = c.app.state.fleet
+    monkeypatch.setattr(f, "start_poll_one", lambda *a, **k: None)
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    assert "stop waiting" in c.get("/device/10.0.0.5").text
+    assert c.post("/device/10.0.0.5/update/clear", data={"csrf": "bad"}).status_code == 403
+    r = c.post("/device/10.0.0.5/update/clear", data={"csrf": token}, follow_redirects=False)
+    assert r.status_code == 303 and "10.0.0.5" not in f.updating
+    assert "Start update" in c.get("/device/10.0.0.5").text

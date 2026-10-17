@@ -13,8 +13,11 @@ from .store import SnapshotStore
 
 log = logging.getLogger(__name__)
 
-# A firmware update normally completes, reboot included, well inside this window.
-UPDATE_TIMEOUT_S = 15 * 60
+# Shelly reports OTA progress and errors only as live events (WebSocket/MQTT), never in
+# Shelly.GetStatus, so the outcome is inferred from polls: a new version means success; a
+# restart on the old version, or no restart at all within NO_RESTART_S, means failure.
+NO_RESTART_S = 6 * 60
+UPDATE_TIMEOUT_S = 15 * 60  # unreachable this long: give up
 
 
 @dataclass
@@ -22,6 +25,20 @@ class UpdateInProgress:
     target: str        # "stable 2.0.1", "beta 2.2.0-beta1" or an image URL
     from_version: str
     started: float     # time.monotonic()
+    start_uptime: int | None = None
+
+
+@dataclass
+class UpdateResult:
+    ok: bool
+    message: str
+    at: str            # ISO time, UTC
+
+
+def _uptime(st: DeviceState | None) -> int | None:
+    sys = (st.status or {}).get("sys") if st and st.ok else None
+    up = sys.get("uptime") if isinstance(sys, dict) else None
+    return up if isinstance(up, int) else None
 
 
 class Fleet:
@@ -37,6 +54,7 @@ class Fleet:
         self.version = 0
         self.busy: set[str] = set()
         self.updating: dict[str, UpdateInProgress] = {}
+        self.update_results: dict[str, UpdateResult] = {}
         self._tasks: set[asyncio.Task] = set()
         self.reload()
 
@@ -65,21 +83,45 @@ class Fleet:
 
     def mark_updating(self, host: str, target: str) -> None:
         st = self.states.get(host)
-        self.updating[host] = UpdateInProgress(target, (st.info.get("ver") if st else "") or "", time.monotonic())
+        self.updating[host] = UpdateInProgress(target, (st.info.get("ver") if st else "") or "",
+                                               time.monotonic(), _uptime(st))
+        self.update_results.pop(host, None)
         self.bump()
 
+    def clear_update(self, host: str) -> None:
+        """Forget the in-progress marker and the last result (the user dismissed them)."""
+        self.updating.pop(host, None)
+        self.update_results.pop(host, None)
+        self.bump()
+
+    def _finish_update(self, st: DeviceState, ok: bool, message: str) -> None:
+        del self.updating[st.host]
+        self.update_results[st.host] = UpdateResult(ok, message, st.polled_at)
+        (log.info if ok else log.warning)("firmware update on %s: %s", st.name, message)
+
     def _settle_update(self, st: DeviceState) -> None:
-        """Clear the in-progress marker once the version changed or the window has passed."""
+        """Decide from this poll whether an update in progress succeeded, failed or is still running."""
         u = self.updating.get(st.host)
         if not u:
             return
-        changed = st.ok and st.info.get("ver") and st.info.get("ver") != u.from_version
-        if changed or time.monotonic() - u.started > UPDATE_TIMEOUT_S:
-            del self.updating[st.host]
-            if changed:
-                log.info("firmware updated: %s %s -> %s", st.name, u.from_version, st.info.get("ver"))
-            else:
-                log.warning("firmware update on %s not seen after %d min", st.name, UPDATE_TIMEOUT_S // 60)
+        elapsed = time.monotonic() - u.started
+        if not st.ok:  # rebooting, or gone: keep waiting, but not forever
+            if elapsed > UPDATE_TIMEOUT_S:
+                self._finish_update(st, False, f"device unreachable for {UPDATE_TIMEOUT_S // 60} min after "
+                                               f"the update to {u.target} started")
+            return
+        ver = st.info.get("ver") or ""
+        if ver and ver != u.from_version:
+            self._finish_update(st, True, f"updated from {u.from_version} to {ver}")
+            return
+        up = _uptime(st)
+        if up is not None and u.start_uptime is not None and up < u.start_uptime:
+            self._finish_update(st, False, f"the device restarted but is still on {ver}: the update to "
+                                           f"{u.target} did not install")
+        elif elapsed > NO_RESTART_S:
+            self._finish_update(st, False, f"no restart {NO_RESTART_S // 60} min after the update to {u.target} "
+                                           f"started and still on {ver}: the update most likely failed "
+                                           "(the device reports the reason only as a live event)")
 
     def _record(self, st: DeviceState, reason: str) -> None:
         self.states[st.host] = st

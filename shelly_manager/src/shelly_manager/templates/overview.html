@@ -70,7 +70,7 @@
       <td>{{ st.name }}</td><td>{{ st.info.model }}<br><small>{{ st.info.app }}</small></td><td>{{ st.info.gen }}</td>
       <td>{{ st.info.ver }}</td>
       <td>{% if host in updating %}<span class="badge warn"><span class="spinner" aria-hidden="true"></span> updating to {{ updating[host].target }}</span>
-          {% else %}{% if upd.stable %}<span class="badge warn">stable {{ upd.stable }}</span>{% endif %}
+          {% else %}{% if host in update_results and not update_results[host].ok %}<a class="badge err" href="{{ base }}/device/{{ host }}">update failed</a> {% endif %}{% if upd.stable %}<span class="badge warn">stable {{ upd.stable }}</span>{% endif %}
           {% if upd.beta %}<span class="badge">beta {{ upd.beta }}</span>{% endif %}
           {% if not upd.stable %}<span class="badge ok">latest stable</span>{% endif %}{% endif %}</td>
       <td>{% if status_rank == 1 %}<span class="badge warn">restart required</span>{% else %}<span class="badge ok">online</span>{% endif %}</td>

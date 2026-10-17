@@ -27,8 +27,18 @@
 <div id="live-firmware" data-live>
 <h2>Firmware</h2>
 {% if st.host in updating %}
-<p class="alert" role="status"><span class="spinner" aria-hidden="true"></span> Updating to {{ updating[st.host].target }}.
-The device downloads the firmware and reboots; this page shows the new version by itself once it is back.</p>
+<div class="alert" role="status"><p style="margin:0"><span class="spinner" aria-hidden="true"></span> Updating to {{ updating[st.host].target }}.
+The device downloads the firmware and reboots; this page shows the result by itself.</p>
+<form class="inline" method="post" action="{{ base }}/device/{{ st.host }}/update/clear">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="btn" type="submit">It is not updating, stop waiting</button>
+</form></div>
+{% elif st.host in update_results %}{% set r = update_results[st.host] %}
+<div class="alert {{ 'ok' if r.ok else 'err' }}" role="status"><p style="margin:0">Last firmware update ({{ r.at[11:19] }} UTC): {{ "succeeded" if r.ok else "failed" }}, {{ r.message }}.</p>
+<form class="inline" method="post" action="{{ base }}/device/{{ st.host }}/update/clear">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="btn" type="submit">Dismiss</button>
+</form></div>
 {% endif %}
 <p>Running <strong>{{ st.info.ver }}</strong>.
 {% if not upd.stable %}This is the latest <strong>stable</strong> release the device knows of: Shelly offers only versions newer than the one installed, so there is no stable update to pick.{% endif %}</p>
