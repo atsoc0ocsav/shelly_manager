@@ -2,10 +2,33 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import asyncio
 import getpass
 import logging
 import sys
+
+from .config import HA_OPTIONS_FILE
+
+
+LOG_LEVELS = ("debug", "info", "warning", "error")
+
+
+def _setup_logging() -> None:
+    """App messages at the chosen level; per-request chatter (httpx, access log) only at debug."""
+    level = (os.environ.get("SM_LOG_LEVEL") or "").lower()
+    if not level and HA_OPTIONS_FILE.exists():
+        try:
+            level = str(json.loads(HA_OPTIONS_FILE.read_text()).get("log_level", "")).lower()
+        except (OSError, ValueError):
+            level = ""
+    if level not in LOG_LEVELS:
+        level = "info"
+    logging.basicConfig(level=level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    quiet = logging.DEBUG if level == "debug" else logging.WARNING
+    for noisy in ("httpx", "httpcore", "uvicorn.access"):
+        logging.getLogger(noisy).setLevel(quiet)
 
 
 def main() -> None:
@@ -15,7 +38,7 @@ def main() -> None:
     sub.add_parser("hash-password", help="print a bcrypt hash for SM_ADMIN_PASSWORD_HASH_FILE")
     sub.add_parser("poll", help="snapshot every device once and exit")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    _setup_logging()
 
     if args.cmd == "hash-password":
         from .auth import hash_password
@@ -48,7 +71,8 @@ def main() -> None:
     import uvicorn
     from .app import create_app
     uvicorn.run(create_app(settings), host=settings.bind_host, port=settings.port,
-                proxy_headers=False, server_header=False,
+                proxy_headers=False, server_header=False, log_config=None,
+                access_log=logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO),
                 ssl_certfile=settings.tls_cert_file, ssl_keyfile=settings.tls_key_file)
 
 

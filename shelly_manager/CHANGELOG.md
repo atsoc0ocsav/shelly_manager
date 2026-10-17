@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- Backup push: 10 s connect timeout instead of hanging until the 60 s limit; for GitHub,
+  automatic retry through `ssh.github.com:443` when port 22 is blocked; failures name the
+  cause (key not accepted, wrong repository, non-empty repository) or report a TCP check of
+  the ports.
+- Logs: per-request lines (every device HTTP call, every page view) are gone at the default
+  level. New **Log level** option; `debug` brings them back.
+
 ## 0.5.0
 
 - Device table columns are sortable: click a header (or press Enter on it) to sort, again

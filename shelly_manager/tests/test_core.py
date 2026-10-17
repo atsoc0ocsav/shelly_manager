@@ -91,3 +91,65 @@ def test_store_push_failure_is_recorded_not_raised(tmp_path):
     s.save("dev-1", {"a": 1}, "first")
     st = s.push()
     assert st.ok is False and st.message
+
+
+def test_remote_host_parsing():
+    from shelly_manager.store import remote_host
+    assert remote_host("git@github.com:me/cfg.git") == ("github.com", 22)
+    assert remote_host("ssh://git@gitea.lan:2222/me/cfg.git") == ("gitea.lan", 2222)
+    assert remote_host("/tmp/bare.git") is None
+    assert remote_host("https://github.com/me/cfg.git") is None
+
+
+def _store_with_commit(tmp_path, remote="git@github.com:me/cfg.git"):
+    s = SnapshotStore(tmp_path / "snap", remote=remote)
+    s.save("dev-1", {"a": 1}, "first")
+    return s
+
+
+def test_push_falls_back_to_443_and_remembers_it(tmp_path, monkeypatch):
+    s = _store_with_commit(tmp_path)
+    tried = []
+
+    def fake_try(via_443):
+        tried.append(via_443)
+        return None if via_443 else "ssh: connect to host github.com port 22: Connection timed out"
+    monkeypatch.setattr(s, "_try_push", fake_try)
+    st = s.push()
+    assert st.ok and "ssh.github.com:443" in st.message and tried == [False, True]
+    s.save("dev-1", {"a": 2}, "second")
+    tried.clear()
+    s.push()
+    assert tried == [True]  # goes straight to 443 next time
+
+
+def test_push_failure_reports_tcp_reachability(tmp_path, monkeypatch):
+    import shelly_manager.store as store_mod
+    s = _store_with_commit(tmp_path)
+    monkeypatch.setattr(s, "_try_push", lambda via_443: "ssh: connect to host github.com port 22: Connection timed out")
+    monkeypatch.setattr(store_mod, "tcp_reachable", lambda h, p, timeout=5.0: p == 443)
+    st = s.push()
+    assert st.ok is False
+    assert "github.com:22 unreachable" in st.message and "ssh.github.com:443 reachable" in st.message
+
+
+def test_push_permission_denied_hint(tmp_path, monkeypatch):
+    s = _store_with_commit(tmp_path)
+    monkeypatch.setattr(s, "_try_push", lambda via_443: "git@github.com: Permission denied (publickey).")
+    st = s.push()
+    assert st.ok is False and "deploy key is not accepted" in st.message
+
+
+def test_ssh_command_has_connect_timeout(tmp_path):
+    s = SnapshotStore(tmp_path / "snap", remote="git@github.com:me/cfg.git", ssh_key_file=tmp_path / "k")
+    cmd = s._env["GIT_SSH_COMMAND"]
+    assert "ConnectTimeout=10" in cmd and "BatchMode=yes" in cmd and "IdentitiesOnly=yes" in cmd
+
+
+def test_git_error_picks_the_cause_line():
+    from shelly_manager.store import _git_error
+    out = ("Warning: Permanently added '[ssh.github.com]:443' (ED25519) to the list of known hosts.\n"
+           "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\n"
+           "Please make sure you have the correct access rights\nand the repository exists.\n")
+    assert _git_error(out) == "git@github.com: Permission denied (publickey)."
+    assert _git_error("ERROR: Repository not found.\nfatal: Could not read\n") == "ERROR: Repository not found."

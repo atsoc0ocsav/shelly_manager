@@ -11,3 +11,6 @@ configuration:
   allow_any_firmware_url:
     name: Allow firmware URLs outside shelly.cloud
     description: Off by default. A custom image is flashed as-is, so only enable this for images you trust.
+  log_level:
+    name: Log level
+    description: info logs device and backup events only. debug also logs every HTTP request to the devices and to the web interface.

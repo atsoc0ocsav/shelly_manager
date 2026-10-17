@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,6 +13,48 @@ from pathlib import Path
 from typing import Any
 
 _SAFE = re.compile(r"^[A-Za-z0-9_.-]+$")
+# git@host:path, ssh://[user@]host[:port]/path
+_SCP_REMOTE = re.compile(r"^(?:[^@/]+@)?(?P<host>[^:/]+):(?!/)")
+_URL_REMOTE = re.compile(r"^ssh://(?:[^@/]+@)?(?P<host>[^:/]+)(?::(?P<port>\d+))?/")
+PUSH_TIMEOUT_S = 90
+# GitHub serves the same SSH endpoint on 443 for networks that block port 22.
+SSH_443_FALLBACK = {"github.com": "ssh.github.com"}
+_CONNECT_FAILURES = ("timed out", "Connection refused", "Network is unreachable",
+                     "No route to host", "Could not resolve hostname", "Connection closed by remote host")
+
+
+def remote_host(remote: str) -> tuple[str, int] | None:
+    """(host, port) of an SSH remote, or None for anything that is not SSH."""
+    m = _URL_REMOTE.match(remote)
+    if m:
+        return m["host"], int(m["port"] or 22)
+    if "://" not in remote:
+        m = _SCP_REMOTE.match(remote)
+        if m:
+            return m["host"], 22
+    return None
+
+
+_ERROR_MARKERS = ("Permission denied", "ERROR:", "ssh:", "Host key verification failed",
+                  "rejected", "fatal:")
+
+
+def _git_error(stderr: str) -> str:
+    """The line of git/ssh output that names the cause, not git's generic closing advice."""
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip() and "Permanently added" not in ln]
+    for marker in _ERROR_MARKERS:
+        for ln in lines:
+            if marker in ln:
+                return ln
+    return lines[-1] if lines else "push failed"
+
+
+def tcp_reachable(host: str, port: int, timeout: float = 5.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 _REV = re.compile(r"^[0-9a-f]{7,40}$")
 
 
@@ -45,12 +88,16 @@ class SnapshotStore:
             self._git("config", "user.email", "shelly-manager@localhost")
         self._env = dict(os.environ)
         self.push_status = PushStatus(configured=bool(remote), remote=remote or "")
+        self._ssh_base = "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=2"
         if ssh_key_file:
             known_hosts = root.parent / "known_hosts"
-            self._env["GIT_SSH_COMMAND"] = (
-                f"ssh -i {shlex.quote(str(ssh_key_file))} -o IdentitiesOnly=yes -o BatchMode=yes "
-                f"-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={shlex.quote(str(known_hosts))}"
+            self._ssh_base += (
+                f" -i {shlex.quote(str(ssh_key_file))} -o IdentitiesOnly=yes"
+                f" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={shlex.quote(str(known_hosts))}"
             )
+        self._env["GIT_SSH_COMMAND"] = self._ssh_base
+        self._via_443 = False  # sticky once port 22 proved unreachable and 443 worked
+        self.remote = remote
         if remote:
             remotes = self._git("remote").split()
             self._git("remote", "set-url" if "origin" in remotes else "add", "origin", remote)
@@ -82,15 +129,58 @@ class SnapshotStore:
             if st.ok is not False:  # keep a failure visible until a push succeeds
                 st.ok, st.message = True, "up to date"
             return st
-        try:
-            self._git("push", "-q", "-u", "origin", "main", timeout=60)
-            st.ok, st.message = True, "pushed"
-        except subprocess.CalledProcessError as e:
-            lines = (e.stderr or "").strip().splitlines()
-            st.ok, st.message = False, lines[-1] if lines else "push failed"
-        except subprocess.TimeoutExpired:
-            st.ok, st.message = False, "push timed out after 60 s"
+        target = remote_host(self.remote or "")
+        fallback = SSH_443_FALLBACK.get(target[0]) if target and target[1] == 22 else None
+        err = self._try_push(via_443=self._via_443 and bool(fallback))
+        if err and fallback and not self._via_443 and self._is_connect_failure(err):
+            err443 = self._try_push(via_443=True)
+            if err443 is None:
+                self._via_443, err = True, None
+            else:
+                err = f"{err}; via {fallback}:443: {err443}"
+        if err is None:
+            st.ok = True
+            st.message = f"pushed (via {fallback}:443, port 22 is blocked)" if self._via_443 else "pushed"
+            return st
+        st.ok, st.message = False, err + self._reachability_hint(target, fallback, err)
         return st
+
+    def _try_push(self, via_443: bool) -> str | None:
+        """Run one push; returns None on success or a one-line error."""
+        cmd = self._ssh_base
+        if via_443:
+            host = remote_host(self.remote or "")[0]
+            cmd += f" -o HostName={SSH_443_FALLBACK[host]} -o Port=443"
+        self._env["GIT_SSH_COMMAND"] = cmd
+        try:
+            self._git("push", "-q", "-u", "origin", "main", timeout=PUSH_TIMEOUT_S)
+            return None
+        except subprocess.CalledProcessError as e:
+            return _git_error(e.stderr or "")
+        except subprocess.TimeoutExpired:
+            return f"push timed out after {PUSH_TIMEOUT_S} s"
+        finally:
+            self._env["GIT_SSH_COMMAND"] = self._ssh_base
+
+    @staticmethod
+    def _is_connect_failure(err: str) -> bool:
+        return any(s in err for s in _CONNECT_FAILURES)
+
+    @staticmethod
+    def _reachability_hint(target, fallback, err: str) -> str:
+        if not target or not SnapshotStore._is_connect_failure(err):
+            if "Permission denied" in err:
+                return " (the deploy key is not accepted: add it to the repository with write access)"
+            if "Repository not found" in err or "does not appear to be a git repository" in err:
+                return " (check the repository URL, and that the deploy key is added to that repository)"
+            if "rejected" in err or "fetch first" in err:
+                return " (the repository already has other history: use an empty repository)"
+            return ""
+        host, port = target
+        checks = [f"{host}:{port} {'reachable' if tcp_reachable(host, port) else 'unreachable'}"]
+        if fallback:
+            checks.append(f"{fallback}:443 {'reachable' if tcp_reachable(fallback, 443) else 'unreachable'}")
+        return " (TCP check from the app: " + ", ".join(checks) + ")"
 
     def _file(self, device_id: str) -> str:
         if not _SAFE.match(device_id):
