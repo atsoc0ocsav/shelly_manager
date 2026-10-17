@@ -42,6 +42,15 @@ input[type=text], input[type=password] { min-height: 40px; padding: 8px; font: i
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @keyframes sm-spin { to { transform: rotate(360deg); } }
 .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sm-spin .8s linear infinite; vertical-align: -1px; }
+.th-sort { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; min-height: 32px; font-weight: 600; }
+.th-sort:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; border-radius: 4px; }
+th[aria-sort="ascending"] .sort-ind::after { content: "\25B2"; font-size: 12px; }
+th[aria-sort="descending"] .sort-ind::after { content: "\25BC"; font-size: 12px; }
+th[aria-sort="none"] .th-sort:hover .sort-ind::after { content: "\25B4"; font-size: 12px; opacity: .5; }
+dialog { border: 1px solid var(--c-border); border-radius: 8px; padding: 24px; max-width: min(720px, 95vw); max-height: 85vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,.25); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog h2 { margin-top: 0; }
+input[type=checkbox] { width: 20px; height: 20px; }
 .diff-add { color: var(--c-success); } .diff-del { color: var(--c-error); }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 </style>

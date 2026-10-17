@@ -38,6 +38,27 @@ def _available_updates(st) -> dict:
 
 templates.env.globals["available_updates"] = _available_updates
 
+
+def _ip_key(host: str) -> str:
+    """Sort key that orders dotted quads numerically and names alphabetically after them."""
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return "0" + "".join(f"{int(p):03d}" for p in parts)
+    return "1" + host.lower()
+
+
+def _version_key(ver: str | None) -> str:
+    """'1.7.5' < '2.0.1' < '2.1.0-beta2' < '2.1.0' as plain strings."""
+    if not ver:
+        return ""
+    core, _, pre = str(ver).partition("-")
+    nums = [int(x) if x.isdigit() else 0 for x in core.split(".")[:3]] + [0, 0, 0]
+    return "".join(f"{n:04d}" for n in nums[:3]) + ("." + pre if pre else "~")
+
+
+templates.env.filters["ipkey"] = _ip_key
+templates.env.filters["verkey"] = _version_key
+
 # Seconds after the action at which the device is re-read, so the UI picks up the result.
 AFTER_UPDATE_POLLS = (30, 90, 180, 300)
 AFTER_REBOOT_POLLS = (15, 45)
@@ -229,20 +250,30 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         return RedirectResponse(url(request, "/"), status_code=303)
 
     @app.post("/update-all", dependencies=[Depends(require_csrf)])
-    async def update_all(request: Request):
+    async def update_all(request: Request, hosts: list[str] = Form(default=[])):
+        """Update the selected devices to their offered stable release."""
         f = fleet(request)
-        started = []
+        wanted = set(hosts)
+        if not wanted:
+            return render(request, "message.html", title="Nothing selected",
+                          message="No device was selected, so no update was started.", back="/")
+        started, failed = [], []
+        skipped = sorted(wanted - {h for h, st in f.states.items()
+                                   if st.ok and "stable" in _available_updates(st)})
         for host, st in f.states.items():
-            if st.ok and "stable" in _available_updates(st):
+            if host in wanted and st.ok and "stable" in _available_updates(st):
                 try:
                     await ops.firmware_update(f.entry(host), "stable")
                     started.append(st.name)
                     f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
                 except (ShellyError, ShellyUnreachable) as e:
                     log.warning("update failed: %s", e)
+                    failed.append(f"{st.name} ({e})")
         return render(request, "message.html", title="Firmware updates started",
                       message=f"Stable update started on {len(started)} device(s): {', '.join(started) or 'none'}. "
-                              "Devices reboot when done. The device list refreshes by itself as they come back.",
+                              + (f"Failed to start: {'; '.join(failed)}. " if failed else "")
+                              + (f"Skipped, no stable update offered any more: {', '.join(skipped)}. " if skipped else "")
+                              + "Devices reboot when done. The device list refreshes by itself as they come back.",
                       back="/")
 
     @app.get("/device/{host}", response_class=HTMLResponse)

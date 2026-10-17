@@ -207,3 +207,65 @@ def test_device_page_explains_latest_stable(client):
     st.updates = {"beta": {"version": "2.2.0-beta1"}}
     page = c.get("/device/10.0.0.5").text
     assert "latest <strong>stable</strong>" in page and "2.2.0-beta1" in page
+
+
+def _two_device_fleet(c, st):
+    from shelly_manager.collector import DeviceState
+    from shelly_manager.devices import DeviceEntry
+    f = c.app.state.fleet
+    other = DeviceState(host="10.0.0.6", url="http://10.0.0.6", ok=True, polled_at="2026-10-16T12:00:00+00:00",
+                        info={"id": "shellyx-2", "name": "Other", "model": "M", "gen": 3, "ver": "1.7.4", "app": "A"},
+                        status={"sys": {}}, updates={"stable": {"version": "2.0.1"}}, methods=[], snapshot={"config": {}})
+    f.entries["10.0.0.6"] = DeviceEntry(url="http://10.0.0.6", password="pw")
+    f.states["10.0.0.6"] = other
+
+
+def test_update_all_updates_only_selected_devices(client, monkeypatch):
+    c, st, _ = client
+    token = login(c)
+    _two_device_fleet(c, st)
+    calls = []
+
+    async def fake(entry, stage="stable", url=None):
+        calls.append((entry.host, stage))
+    monkeypatch.setattr(app_mod.ops, "firmware_update", fake)
+    monkeypatch.setattr(c.app.state.fleet, "start_poll_one", lambda *a, **k: None)
+    r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.6"]})
+    assert calls == [("10.0.0.6", "stable")] and "Other" in r.text
+
+
+def test_update_all_with_nothing_selected_does_nothing(client, monkeypatch):
+    c, st, _ = client
+    token = login(c)
+    calls = []
+    monkeypatch.setattr(app_mod.ops, "firmware_update", lambda *a, **k: calls.append(a))
+    r = c.post("/update-all", data={"csrf": token})
+    assert "Nothing selected" in r.text and not calls
+
+
+def test_update_all_skips_a_device_that_no_longer_offers_stable(client, monkeypatch):
+    c, st, _ = client
+    token = login(c)
+    st.updates = {"beta": {"version": "2.2.0-beta1"}}
+    calls = []
+    monkeypatch.setattr(app_mod.ops, "firmware_update", lambda *a, **k: calls.append(a))
+    r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.5"]})
+    assert "Skipped" in r.text and "10.0.0.5" in r.text and not calls
+
+
+def test_overview_has_sortable_headers_and_update_dialog(client):
+    c, st, _ = client
+    login(c)
+    _two_device_fleet(c, st)
+    page = c.get("/").text
+    assert 'data-sort-key="ip"' in page and 'aria-sort="ascending"><button type="button" class="th-sort" data-sort-key="ip"' in page
+    assert page.count('scope="col" aria-sort="none"') == 8
+    assert '<dialog id="update-dialog"' in page and "Update to stable (2)" in page
+    assert page.count('name="hosts"') == 2
+    assert "<td>1.7.4</td><td><strong>2.0.1</strong></td>" in page
+
+
+def test_sort_keys_order_versions_and_ips():
+    from shelly_manager.app import _ip_key, _version_key
+    assert _ip_key("10.0.0.9") < _ip_key("10.0.0.10") < _ip_key("host.lan")
+    assert _version_key("1.7.5") < _version_key("2.0.1") < _version_key("2.1.0-beta2") < _version_key("2.1.0")

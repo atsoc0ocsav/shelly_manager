@@ -26,7 +26,8 @@ Non-commercial use only: see [Licence](#licence).
   reports `restart_required`. The editable components come from the device's own
   `Shelly.ListMethods`, so no per-model schema is needed.
 - **Firmware**: update a device to the stable or beta release it offers, or to a specific
-  firmware image URL (restricted to `*.shelly.cloud` by default); "update all to stable".
+  firmware image URL (restricted to `*.shelly.cloud` by default); update a chosen set of
+  devices to stable from a dialog showing current and new versions.
 - **Device credentials**: override a device password in the UI; it is tested against the
   device before it is saved.
 

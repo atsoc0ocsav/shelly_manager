@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Devices</h1>
+{% set candidates = [] %}
+{% for host, st in rows if st and st.ok and available_updates(st).stable %}{% set _ = candidates.append((host, st)) %}{% endfor %}
 <div id="live-overview" data-live>
 <p id="live-status" aria-live="polite">{% if "*" in busy %}<span class="spinner" aria-hidden="true"></span> Polling all devices; rows update as each one answers.{% elif busy %}<span class="spinner" aria-hidden="true"></span> Polling {{ busy | length }} device(s).{% else %}This page updates by itself.{% endif %}</p>
 <div class="row">
@@ -8,11 +10,8 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn" type="submit" {{ "disabled" if "*" in busy }}>{{ "Polling..." if "*" in busy else "Poll all now" }}</button>
   </form>
-  <form class="inline" method="post" action="{{ base }}/update-all"
-        data-confirm="Start the stable firmware update on every device that has one? Each device reboots when done.">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="btn btn-primary" type="submit">Update all to stable</button>
-  </form>
+  <button class="btn btn-primary" type="button" data-open-dialog="update-dialog" {{ "disabled" if not candidates }}>
+    {{ "Update to stable (%d)" | format(candidates | length) if candidates else "All on latest stable" }}</button>
 </div>
 {% if push.configured %}
 <p>Config backup to <code>{{ push.remote }}</code>:
@@ -51,23 +50,32 @@
 {% if not rows %}
 <p class="alert">No devices configured. Add <code>URL password</code> lines to the devices file and restart.</p>
 {% else %}
-<table>
-  <thead><tr><th scope="col">IP</th><th scope="col">Name</th><th scope="col">Model</th><th scope="col">Gen</th><th scope="col">Firmware</th><th scope="col">Update</th><th scope="col">Status</th><th scope="col">Last poll (UTC)</th><th scope="col">Credentials</th></tr></thead>
+{% set cols = [("ip","IP"),("name","Name"),("model","Model"),("gen","Gen"),("fw","Firmware"),("update","Update"),("status","Status"),("poll","Last poll (UTC)"),("cred","Credentials")] %}
+<table class="sortable" id="device-table">
+  <thead><tr>
+    {% for key, label in cols %}<th scope="col" aria-sort="{{ 'ascending' if key == 'ip' else 'none' }}"><button type="button" class="th-sort" data-sort-key="{{ key }}">{{ label }}<span class="sort-ind" aria-hidden="true"></span></button></th>{% endfor %}
+  </tr></thead>
   <tbody>
   {% for host, st in rows %}
-  <tr>
+  {% set upd = available_updates(st) if st and st.ok else {} %}
+  {% set status_rank = (1 if st.status.sys and st.status.sys.restart_required else 0) if st and st.ok else ((2 if "401" in (st.error or "") else 3) if st else 4) %}
+  <tr data-s-ip="{{ host | ipkey }}" data-s-name="{{ (st.name if st and st.ok else host) | lower }}"
+      data-s-model="{{ st.info.model if st and st.ok else '' }}" data-s-gen="{{ st.info.gen if st and st.ok else 0 }}"
+      data-s-fw="{{ (st.info.ver if st and st.ok else '') | verkey }}"
+      data-s-update="{{ 2 if upd.stable else (1 if upd.beta else (0 if st and st.ok else -1)) }}"
+      data-s-status="{{ status_rank }}" data-s-poll="{{ st.polled_at if st else '' }}"
+      data-s-cred="{{ entries[host].source }}">
     <td>{% if st and st.ok %}<a href="{{ base }}/device/{{ host }}">{{ host }}</a>{% else %}{{ host }}{% endif %}{% if host in busy %} <span class="spinner" role="img" aria-label="polling"></span>{% endif %}</td>
     {% if st and st.ok %}
-      {% set upd = available_updates(st) %}
       <td>{{ st.name }}</td><td>{{ st.info.model }}<br><small>{{ st.info.app }}</small></td><td>{{ st.info.gen }}</td>
       <td>{{ st.info.ver }}</td>
       <td>{% if upd.stable %}<span class="badge warn">stable {{ upd.stable }}</span>{% endif %}
           {% if upd.beta %}<span class="badge">beta {{ upd.beta }}</span>{% endif %}
           {% if not upd.stable %}<span class="badge ok">latest stable</span>{% endif %}</td>
-      <td>{% if st.status.sys and st.status.sys.restart_required %}<span class="badge warn">restart required</span>{% else %}<span class="badge ok">online</span>{% endif %}</td>
+      <td>{% if status_rank == 1 %}<span class="badge warn">restart required</span>{% else %}<span class="badge ok">online</span>{% endif %}</td>
       <td>{{ st.polled_at[11:19] }}</td>
     {% elif st %}
-      <td colspan="6"><span class="badge err">{{ "wrong password" if "401" in (st.error or "") else "unreachable" }}</span> {{ st.error }}
+      <td colspan="6"><span class="badge err">{{ "wrong password" if status_rank == 2 else "unreachable" }}</span> {{ st.error }}
           <a href="{{ base }}/device/{{ host }}/credentials">Update stored password</a></td><td>{{ st.polled_at[11:19] }}</td>
     {% else %}
       <td colspan="7">not polled yet</td>
@@ -78,5 +86,39 @@
   </tbody>
 </table>
 {% endif %}
+</div>
+
+{# Outside the live region; refreshed only while closed, so selections are never lost. #}
+<div id="live-update-dialog" data-live>
+<dialog id="update-dialog" aria-labelledby="update-dialog-title">
+  <form method="post" action="{{ base }}/update-all" data-update-form>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h2 id="update-dialog-title">Update to stable firmware</h2>
+    {% if candidates %}
+    <p>Selected devices download and install the update, then reboot. Untick any device you want to leave as it is.</p>
+    <table>
+      <thead><tr>
+        <th scope="col"><input type="checkbox" checked data-select-all aria-label="Select all devices"></th>
+        <th scope="col">Device</th><th scope="col">IP</th><th scope="col">Current</th><th scope="col">New</th>
+      </tr></thead>
+      <tbody>
+      {% for host, st in candidates %}
+      <tr>
+        <td><input type="checkbox" name="hosts" value="{{ host }}" id="upd-{{ loop.index }}" checked></td>
+        <td><label for="upd-{{ loop.index }}">{{ st.name }}</label></td>
+        <td>{{ host }}</td><td>{{ st.info.ver }}</td><td><strong>{{ available_updates(st).stable }}</strong></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Every device is on the latest stable firmware.</p>
+    {% endif %}
+    <div class="row">
+      <button class="btn btn-primary" type="submit" data-update-submit>Update <span data-selected-count>{{ candidates | length }}</span> device(s)</button>
+      <button class="btn" type="button" data-close-dialog>Cancel</button>
+    </div>
+  </form>
+</dialog>
 </div>
 {% endblock %}

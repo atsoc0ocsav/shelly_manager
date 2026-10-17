@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Device table columns are sortable: click a header (or press Enter on it) to sort, again
+  to reverse. Default is IP ascending; the choice is kept across live refreshes and pages.
+- **Update to stable** opens a dialog listing every device with a stable update, with its
+  current and new version. All are selected by default; untick any to leave them out.
+
 ## 0.4.2
 
 - **Rotate deploy key** button on the overview (Home Assistant only): replaces the backup
