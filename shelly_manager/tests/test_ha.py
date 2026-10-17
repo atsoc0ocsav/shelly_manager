@@ -1,6 +1,8 @@
 import json
 import re
 
+from test_app import client  # noqa: F401  (fixture reuse)
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -113,3 +115,31 @@ def test_ha_overview_shows_the_deploy_key(tmp_path):
     page = TestClient(app, client=PROXY).get("/", headers=USER).text
     assert "ssh-ed25519 AAAATEST" in page and "PRIVATE" not in page
     assert "Allow write access" in page
+
+
+def test_rotate_deploy_key_replaces_the_pair(tmp_path):
+    import shutil
+    if not shutil.which("ssh-keygen"):
+        pytest.skip("ssh-keygen not installed")
+    (tmp_path / "options.json").write_text(json.dumps({"snapshot_remote": "git@github.com:me/cfg.git"}))
+    (tmp_path / "deploy_key").write_text("OLD-PRIVATE")
+    (tmp_path / "deploy_key.pub").write_text("ssh-ed25519 OLDPUB shelly-manager@home-assistant\n")
+    s = Settings.from_ha_options(tmp_path / "options.json", tmp_path, _entries(tmp_path))
+    c = TestClient(app_mod.create_app(s, start_poller=False), client=PROXY)
+    token = re.search(r'name="csrf" value="([^"]+)"', c.get("/", headers=USER).text).group(1)
+    assert c.post("/backup/rotate-key", data={"csrf": "bad"}, headers=USER).status_code == 403
+    r = c.post("/backup/rotate-key", data={"csrf": token}, headers=USER)
+    assert "New deploy key created" in r.text
+    pub = (tmp_path / "deploy_key.pub").read_text()
+    assert pub.startswith("ssh-ed25519 ") and "OLDPUB" not in pub and pub.split()[1] in r.text
+    assert (tmp_path / "deploy_key").read_text() != "OLD-PRIVATE"
+    assert oct((tmp_path / "deploy_key").stat().st_mode & 0o777) == "0o600"
+    assert "PRIVATE KEY" not in r.text
+    assert not list(tmp_path.glob(".keygen.*"))
+
+
+def test_rotate_deploy_key_not_available_standalone(client):
+    from test_app import login
+    c, _, _ = client
+    token = login(c)
+    assert c.post("/backup/rotate-key", data={"csrf": token}).status_code == 404

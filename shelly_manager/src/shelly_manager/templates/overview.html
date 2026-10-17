@@ -24,7 +24,17 @@
   <p>Add this public key to the repository as a deploy key <strong>with write access</strong>
      (GitHub: repository Settings, Deploy keys, Add deploy key, tick "Allow write access").</p>
   <pre>{{ deploy_key }}</pre>
+  <form class="inline" method="post" action="{{ base }}/backup/rotate-key"
+        data-confirm="Create a new deploy key? The current key stops being used immediately, and pushes fail until you add the new one to the repository.">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-danger" type="submit">Rotate deploy key</button>
+  </form>
 </details>
+{% elif ha_mode %}
+<form class="inline" method="post" action="{{ base }}/backup/rotate-key">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="btn" type="submit">Create deploy key</button>
+</form>
 {% endif %}
 {% elif ha_mode %}
 <p><span class="badge warn">config backup off</span> History is kept inside the app only. To push it to a private git repository, set <strong>Config backup repository</strong> on the app's Configuration tab and restart the app.</p>

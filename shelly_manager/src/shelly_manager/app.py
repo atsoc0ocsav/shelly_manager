@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import deploy_key as dk
 from . import operations as ops
 from .auth import (LoginRequired, change_password, check_login, csrf_token, current_user,
                    from_trusted_proxy, require_csrf)
@@ -156,8 +157,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
     async def overview(request: Request, user: str = Depends(current_user)):
         f = fleet(request)
         rows = [(host, f.states.get(host)) for host in sorted(f.entries, key=lambda h: tuple(int(p) if p.isdigit() else 0 for p in h.split(".")))]
-        pub = settings.git_ssh_key_file.with_suffix(".pub") if settings.git_ssh_key_file else None
-        deploy_key = pub.read_text().strip() if pub and pub.is_file() else None
+        deploy_key = dk.public_key(settings.git_ssh_key_file) if settings.git_ssh_key_file else None
         return render(request, "overview.html", rows=rows, push=f.store.push_status, entries=f.entries,
                       deploy_key=deploy_key)
 
@@ -204,6 +204,24 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         log.info("stored password updated for %s (%s)", host, "untested" if action == "force" else "verified")
         await f.poll_one(host, "credentials updated")
         return RedirectResponse(url(request, f"/device/{host}" if f.states[host].ok else "/"), status_code=303)
+
+    @app.post("/backup/rotate-key", dependencies=[Depends(require_csrf)])
+    async def rotate_key(request: Request):
+        # Only the app-owned key in HA mode; a standalone key file belongs to the operator.
+        if not (settings.ha_mode and settings.git_ssh_key_file):
+            raise HTTPException(404, "No app-managed deploy key.")
+        try:
+            new = await asyncio.to_thread(dk.rotate, settings.git_ssh_key_file)
+        except Exception as e:  # noqa: BLE001
+            log.exception("deploy key rotation failed")
+            return render(request, "message.html", title="Key rotation failed",
+                          message=f"The old key is unchanged. {type(e).__name__}: {e}")
+        log.info("deploy key rotated: %s", new)
+        fleet(request).bump()
+        return render(request, "message.html", title="New deploy key created",
+                      message="Add the new key below to the backup repository as a deploy key with write "
+                              "access, and remove the old one there. Pushes fail until the new key is added.",
+                      code=new, back="/")
 
     @app.post("/poll", dependencies=[Depends(require_csrf)])
     async def poll_all(request: Request):

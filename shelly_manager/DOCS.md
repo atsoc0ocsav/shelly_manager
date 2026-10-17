@@ -41,6 +41,11 @@ backups of the app, so the history survives a restore even without the git backu
    repository as a deploy key **with write access** (GitHub: Settings, Deploy keys).
 4. Wait for the next poll or press **Poll all now**; the overview shows the push result.
 
+To replace the key (for example when GitHub reports it as already in use, or after a
+leak), open **Deploy key for the backup repository** on the overview and press **Rotate
+deploy key**. A new pair is created at once and shown; add it to the repository and remove
+the old one there. Pushes fail until the new key is added.
+
 Only SSH URLs are supported, with this deploy key; HTTPS URLs and personal access tokens
 are not. A deploy key reaches only the one repository it is added to. The server's host key
 is trusted on first connection and stored in `/data/known_hosts`.

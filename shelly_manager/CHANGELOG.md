@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- **Rotate deploy key** button on the overview (Home Assistant only): replaces the backup
+  repository key with a new one and shows it. Also offers to create the key when a
+  repository is set but no key exists yet.
+
 ## 0.4.1
 
 - Inside Home Assistant, the header no longer shows the user name.

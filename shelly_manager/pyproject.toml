@@ -1,6 +1,6 @@
 [project]
 name = "shelly-manager"
-version = "0.4.1"
+version = "0.4.2"
 description = "Inventory, config history, settings editor and firmware updates for Shelly Gen2+ devices"
 requires-python = ">=3.12,<3.14"
 license = "CC-BY-NC-SA-4.0"
