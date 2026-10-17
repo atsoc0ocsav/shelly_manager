@@ -3,13 +3,28 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+
 import httpx
+
+# httpx logs every request at INFO ("HTTP Request: POST ... 200 OK"), about seven per device
+# per poll. Keep it quiet unless debugging; _setup_logging() lowers this again for debug.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from .devices import DeviceEntry
 
 
 class ShellyError(RuntimeError):
-    """The device answered with a JSON-RPC error."""
+    """The device answered with a JSON-RPC error (``code`` is the device's error code)."""
+
+    def __init__(self, message: str, code: int | None = None):
+        super().__init__(message)
+        self.code = code
+
+
+# Shelly JSON-RPC error codes this app reacts to.
+ERR_ALREADY_IN_PROGRESS = -106
 
 
 class ShellyUnreachable(RuntimeError):
@@ -52,5 +67,6 @@ class ShellyClient:
         data = r.json()
         if "error" in data:
             err = data["error"]
-            raise ShellyError(f"{self.entry.host}: {method}: {err.get('code')} {err.get('message')}")
+            raise ShellyError(f"{self.entry.host}: {method}: {err.get('code')} {err.get('message')}",
+                              code=err.get("code"))
         return data.get("result")

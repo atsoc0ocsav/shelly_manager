@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Firmware updates · Shelly Manager{% endblock %}
+{% block content %}
+<h1>Firmware updates</h1>
+<p class="alert" role="status">{{ started }} of {{ results | length }} selected device(s) started updating.
+Devices reboot when done; the device list shows the new versions by itself as they come back.</p>
+<table>
+  <thead><tr><th scope="col">Device</th><th scope="col">IP</th><th scope="col">Result</th><th scope="col">Details</th></tr></thead>
+  <tbody>
+  {% for name, host, outcome, detail in results %}
+  <tr><td>{{ name }}</td><td>{{ host }}</td>
+      <td><span class="badge {{ {'started': 'ok', 'in progress': 'warn', 'skipped': '', 'failed': 'err'}[outcome] }}">{{ outcome }}</span></td>
+      <td>{{ detail }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="row"><a href="{{ base }}/">Back to devices</a></div>
+{% endblock %}

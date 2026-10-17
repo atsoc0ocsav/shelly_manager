@@ -26,6 +26,10 @@
 
 <div id="live-firmware" data-live>
 <h2>Firmware</h2>
+{% if st.host in updating %}
+<p class="alert" role="status"><span class="spinner" aria-hidden="true"></span> Updating to {{ updating[st.host].target }}.
+The device downloads the firmware and reboots; this page shows the new version by itself once it is back.</p>
+{% endif %}
 <p>Running <strong>{{ st.info.ver }}</strong>.
 {% if not upd.stable %}This is the latest <strong>stable</strong> release the device knows of: Shelly offers only versions newer than the one installed, so there is no stable update to pick.{% endif %}</p>
 <form method="post" action="{{ base }}/device/{{ st.host }}/update" data-confirm="Start the firmware update on {{ st.name }}? The device reboots when done.">
@@ -38,7 +42,7 @@
     <p><label style="font-weight:400"><input type="radio" name="target" value="url" {{ 'checked' if not upd }}> A specific firmware image (URL)</label>
        <input type="text" name="url" aria-label="Firmware image URL" placeholder="https://...shelly.cloud/.../firmware.zip" style="max-width:640px">
        <br><small>Use this to install a version Shelly no longer offers, or to downgrade.{% if not allow_any_firmware_url %} Only *.shelly.cloud hosts are accepted.{% endif %} The image must be for this model ({{ st.info.app }}).</small></p>
-    <button class="btn btn-primary" type="submit">Start update</button>
+    <button class="btn btn-primary" type="submit" {{ "disabled" if st.host in updating }}>{{ "Update in progress" if st.host in updating else "Start update" }}</button>
   </fieldset>
 </form>
 </div>

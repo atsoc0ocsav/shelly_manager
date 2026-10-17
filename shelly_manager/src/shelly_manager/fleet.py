@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass
 
 from .collector import DeviceState, collect
 from .devices import DeviceEntry, load_devices, set_password
@@ -10,6 +12,16 @@ from .ha_source import HaDiscovery, discover
 from .store import SnapshotStore
 
 log = logging.getLogger(__name__)
+
+# A firmware update normally completes, reboot included, well inside this window.
+UPDATE_TIMEOUT_S = 15 * 60
+
+
+@dataclass
+class UpdateInProgress:
+    target: str        # "stable 2.0.1", "beta 2.2.0-beta1" or an image URL
+    from_version: str
+    started: float     # time.monotonic()
 
 
 class Fleet:
@@ -24,6 +36,7 @@ class Fleet:
         # ``busy`` holds hosts being polled right now ("*" while a fleet poll runs).
         self.version = 0
         self.busy: set[str] = set()
+        self.updating: dict[str, UpdateInProgress] = {}
         self._tasks: set[asyncio.Task] = set()
         self.reload()
 
@@ -50,8 +63,27 @@ class Fleet:
             raise KeyError(host)
         return self.entries[host]
 
+    def mark_updating(self, host: str, target: str) -> None:
+        st = self.states.get(host)
+        self.updating[host] = UpdateInProgress(target, (st.info.get("ver") if st else "") or "", time.monotonic())
+        self.bump()
+
+    def _settle_update(self, st: DeviceState) -> None:
+        """Clear the in-progress marker once the version changed or the window has passed."""
+        u = self.updating.get(st.host)
+        if not u:
+            return
+        changed = st.ok and st.info.get("ver") and st.info.get("ver") != u.from_version
+        if changed or time.monotonic() - u.started > UPDATE_TIMEOUT_S:
+            del self.updating[st.host]
+            if changed:
+                log.info("firmware updated: %s %s -> %s", st.name, u.from_version, st.info.get("ver"))
+            else:
+                log.warning("firmware update on %s not seen after %d min", st.name, UPDATE_TIMEOUT_S // 60)
+
     def _record(self, st: DeviceState, reason: str) -> None:
         self.states[st.host] = st
+        self._settle_update(st)
         if st.ok:
             if self.store.save(st.device_id, st.snapshot, reason):
                 log.info("config changed: %s (%s)", st.name, reason)

@@ -21,7 +21,7 @@ from . import deploy_key as dk
 from . import operations as ops
 from .auth import (LoginRequired, change_password, check_login, csrf_token, current_user,
                    from_trusted_proxy, require_csrf)
-from .client import ShellyError, ShellyUnreachable
+from .client import ERR_ALREADY_IN_PROGRESS, ShellyError, ShellyUnreachable
 from .config import Settings
 from .fleet import Fleet
 from .store import SnapshotStore
@@ -130,6 +130,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         ctx["base"] = base(request)
         ctx["version"] = request.app.state.fleet.version
         ctx["busy"] = request.app.state.fleet.busy
+        ctx["updating"] = request.app.state.fleet.updating
         ctx["ha_mode"] = settings.ha_mode
         ctx["ha"] = request.app.state.fleet.ha
         return templates.TemplateResponse(request, name, ctx)
@@ -249,6 +250,28 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         fleet(request).start_poll_all("manual poll")  # results stream into the page
         return RedirectResponse(url(request, "/"), status_code=303)
 
+    async def start_update(f: Fleet, host: str, stage: str | None, version: str,
+                           url: str | None = None) -> tuple[str, str]:
+        """Ask one device to update. Returns (outcome, detail) for the UI; never raises."""
+        target = f"{stage} {version}" if stage else f"the image at {version}"
+        try:
+            await ops.firmware_update(f.entry(host), stage or "stable", url=url)
+        except ShellyError as e:
+            if e.code == ERR_ALREADY_IN_PROGRESS:
+                f.mark_updating(host, "a version already being installed")
+                f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
+                return "in progress", "the device reports an update already in progress"
+            log.warning("update failed: %s", e)
+            return "failed", str(e)
+        except ShellyUnreachable as e:
+            log.warning("update failed: %s", e)
+            return "failed", f"device unreachable ({e})"
+        log.info("firmware update on %s: %s", host, target)
+        f.mark_updating(host, target)
+        f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
+        return "started", (f"updating to {target}. The device reboots when done; "
+                           "the page shows the new version by itself once it is back.")
+
     @app.post("/update-all", dependencies=[Depends(require_csrf)])
     async def update_all(request: Request, hosts: list[str] = Form(default=[])):
         """Update the selected devices to their offered stable release."""
@@ -257,24 +280,20 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         if not wanted:
             return render(request, "message.html", title="Nothing selected",
                           message="No device was selected, so no update was started.", back="/")
-        started, failed = [], []
-        skipped = sorted(wanted - {h for h, st in f.states.items()
-                                   if st.ok and "stable" in _available_updates(st)})
-        for host, st in f.states.items():
-            if host in wanted and st.ok and "stable" in _available_updates(st):
-                try:
-                    await ops.firmware_update(f.entry(host), "stable")
-                    started.append(st.name)
-                    f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
-                except (ShellyError, ShellyUnreachable) as e:
-                    log.warning("update failed: %s", e)
-                    failed.append(f"{st.name} ({e})")
-        return render(request, "message.html", title="Firmware updates started",
-                      message=f"Stable update started on {len(started)} device(s): {', '.join(started) or 'none'}. "
-                              + (f"Failed to start: {'; '.join(failed)}. " if failed else "")
-                              + (f"Skipped, no stable update offered any more: {', '.join(skipped)}. " if skipped else "")
-                              + "Devices reboot when done. The device list refreshes by itself as they come back.",
-                      back="/")
+        results = []  # (name, host, outcome, detail) for the results table
+        for host in sorted(wanted, key=_ip_key):
+            st = f.states.get(host)
+            name = st.name if st else host
+            offered = _available_updates(st) if st and st.ok else {}
+            if host in f.updating:
+                results.append((name, host, "in progress", f"already updating to {f.updating[host].target}"))
+            elif "stable" not in offered:
+                results.append((name, host, "skipped", "no stable update offered any more"))
+            else:
+                outcome, detail = await start_update(f, host, "stable", offered["stable"])
+                results.append((name, host, outcome, detail))
+        started = sum(1 for r in results if r[2] == "started")
+        return render(request, "update_results.html", results=results, started=started)
 
     @app.get("/device/{host}", response_class=HTMLResponse)
     async def device(request: Request, host: str, user: str = Depends(current_user)):
@@ -305,23 +324,24 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         f = fleet(request)
         st = state_or_404(f, host)
         offered = _available_updates(st)
+        if host in f.updating:
+            return render(request, "message.html", title="Update already in progress",
+                          message=f"{st.name} is already updating to {f.updating[host].target}. "
+                                  "Its page shows the new version by itself once it is back.",
+                          back=f"/device/{host}")
         try:
             if target == "url":
                 fw_url = ops.validate_firmware_url(url, settings.allow_any_firmware_url)
-                await ops.firmware_update(f.entry(host), url=fw_url)
-                label = f"the image at {fw_url}"
+                outcome, detail = await start_update(f, host, None, fw_url, url=fw_url)
             elif target in offered:
-                await ops.firmware_update(f.entry(host), target)
-                label = f"{target} {offered[target]}"
+                outcome, detail = await start_update(f, host, target, offered[target])
             else:
                 raise ValueError(f"The device does not offer a {target} update right now.")
-        except (ShellyError, ShellyUnreachable, ValueError) as e:
-            return render(request, "message.html", title="Update failed", message=str(e), back=f"/device/{host}")
-        log.info("firmware update on %s: %s", st.name, label)
-        f.start_poll_one(host, "after firmware update", AFTER_UPDATE_POLLS)
-        return render(request, "message.html", title="Firmware update started",
-                      message=f"{st.name}: updating to {label}. The device reboots when done; "
-                              "its page shows the new version by itself once it is back.",
+        except ValueError as e:
+            outcome, detail = "failed", str(e)
+        titles = {"started": "Firmware update started", "in progress": "Update already in progress",
+                  "failed": "Update failed"}
+        return render(request, "message.html", title=titles[outcome], message=f"{st.name}: {detail}",
                       back=f"/device/{host}")
 
     @app.post("/device/{host}/reboot", dependencies=[Depends(require_csrf)])

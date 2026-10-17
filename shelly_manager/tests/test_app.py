@@ -250,7 +250,7 @@ def test_update_all_skips_a_device_that_no_longer_offers_stable(client, monkeypa
     calls = []
     monkeypatch.setattr(app_mod.ops, "firmware_update", lambda *a, **k: calls.append(a))
     r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.5"]})
-    assert "Skipped" in r.text and "10.0.0.5" in r.text and not calls
+    assert ">skipped<" in r.text and "no stable update offered" in r.text and "10.0.0.5" in r.text and not calls
 
 
 def test_overview_has_sortable_headers_and_update_dialog(client):
@@ -269,3 +269,62 @@ def test_sort_keys_order_versions_and_ips():
     from shelly_manager.app import _ip_key, _version_key
     assert _ip_key("10.0.0.9") < _ip_key("10.0.0.10") < _ip_key("host.lan")
     assert _version_key("1.7.5") < _version_key("2.0.1") < _version_key("2.1.0-beta2") < _version_key("2.1.0")
+
+
+def test_update_already_in_progress_is_shown_not_just_logged(client, monkeypatch):
+    from shelly_manager.client import ShellyError
+    c, st, _ = client
+    token = login(c)
+    monkeypatch.setattr(c.app.state.fleet, "start_poll_one", lambda *a, **k: None)
+
+    async def busy(entry, stage="stable", url=None):
+        raise ShellyError("10.0.0.5: Shelly.Update: -106 Already in progress", code=-106)
+    monkeypatch.setattr(app_mod.ops, "firmware_update", busy)
+    r = c.post("/device/10.0.0.5/update", data={"csrf": token, "target": "stable"})
+    assert "Update already in progress" in r.text
+    assert "10.0.0.5" in c.app.state.fleet.updating
+    page = c.get("/").text
+    assert "updating to" in page and "All on latest stable" in page  # excluded from the dialog
+    assert "Update in progress" in c.get("/device/10.0.0.5").text
+
+
+def test_second_update_request_is_refused_while_updating(client, monkeypatch):
+    c, st, _ = client
+    token = login(c)
+    monkeypatch.setattr(c.app.state.fleet, "start_poll_one", lambda *a, **k: None)
+    calls = []
+
+    async def ok(entry, stage="stable", url=None):
+        calls.append(stage)
+    monkeypatch.setattr(app_mod.ops, "firmware_update", ok)
+    assert "Firmware update started" in c.post("/device/10.0.0.5/update", data={"csrf": token, "target": "stable"}).text
+    assert "already updating" in c.post("/device/10.0.0.5/update", data={"csrf": token, "target": "stable"}).text
+    r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.5"]})
+    assert "in progress" in r.text and "0 of 1" in r.text
+    assert calls == ["stable"]
+
+
+def test_update_marker_clears_when_the_version_changes(client):
+    from shelly_manager.collector import DeviceState
+    c, st, _ = client
+    f = c.app.state.fleet
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    new = DeviceState(host="10.0.0.5", url=st.url, ok=True, polled_at="x", info=dict(st.info, ver="2.0.1"),
+                      status=st.status, updates={}, methods=[], snapshot=st.snapshot)
+    f._record(new, "after firmware update")
+    assert "10.0.0.5" not in f.updating
+
+
+def test_update_all_reports_each_device(client, monkeypatch):
+    from shelly_manager.client import ShellyError
+    c, st, _ = client
+    token = login(c)
+    _two_device_fleet(c, st)
+    monkeypatch.setattr(c.app.state.fleet, "start_poll_one", lambda *a, **k: None)
+
+    async def mixed(entry, stage="stable", url=None):
+        if entry.host == "10.0.0.6":
+            raise ShellyError("10.0.0.6: Shelly.Update: -106 Already in progress", code=-106)
+    monkeypatch.setattr(app_mod.ops, "firmware_update", mixed)
+    r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.5", "10.0.0.6"]})
+    assert "1 of 2" in r.text and ">started<" in r.text and ">in progress<" in r.text

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- An update a device reports as already running (Shelly error -106) is now shown as
+  **updating** on the overview and device page instead of only being logged. Devices being
+  updated are left out of the update dialog, and a second request is refused with a message.
+- **Update to stable** shows a result per device: started, in progress, skipped or failed.
+- The `httpx` request lines are silenced as soon as the app loads, whatever the log
+  configuration. The log's first line names the running version and log level.
+
 ## 0.5.1
 
 - Backup push: 10 s connect timeout instead of hanging until the 60 s limit; for GitHub,

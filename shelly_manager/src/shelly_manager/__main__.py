@@ -29,6 +29,8 @@ def _setup_logging() -> None:
     quiet = logging.DEBUG if level == "debug" else logging.WARNING
     for noisy in ("httpx", "httpcore", "uvicorn.access"):
         logging.getLogger(noisy).setLevel(quiet)
+    from . import __version__
+    logging.getLogger("shelly_manager").info("Shelly Manager %s, log level %s", __version__, level)
 
 
 def main() -> None:

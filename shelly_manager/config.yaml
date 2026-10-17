@@ -1,5 +1,5 @@
 name: Shelly Manager
-version: "0.5.1"
+version: "0.5.2"
 slug: shelly_manager
 description: Inventory, config history, settings editor and firmware updates for Shelly Gen2+ devices
 url: https://github.com/atsoc0ocsav/shelly_manager

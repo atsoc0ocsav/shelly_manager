@@ -153,3 +153,9 @@ def test_git_error_picks_the_cause_line():
            "Please make sure you have the correct access rights\nand the repository exists.\n")
     assert _git_error(out) == "git@github.com: Permission denied (publickey)."
     assert _git_error("ERROR: Repository not found.\nfatal: Could not read\n") == "ERROR: Repository not found."
+
+
+def test_httpx_request_logs_are_quiet_by_default():
+    import logging
+    import shelly_manager.client  # noqa: F401  (sets the levels on import)
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
