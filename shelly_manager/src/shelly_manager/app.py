@@ -23,7 +23,7 @@ from .auth import (LoginRequired, change_password, check_login, csrf_token, curr
                    from_trusted_proxy, require_csrf)
 from .client import ERR_ALREADY_IN_PROGRESS, ShellyError, ShellyUnreachable
 from .config import Settings
-from .fleet import Fleet
+from .fleet import UPDATE_CONCURRENCY, Fleet
 from .store import SnapshotStore
 
 log = logging.getLogger(__name__)
@@ -132,6 +132,7 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         ctx["busy"] = request.app.state.fleet.busy
         ctx["updating"] = request.app.state.fleet.updating
         ctx["update_results"] = request.app.state.fleet.update_results
+        ctx["update_queue"] = request.app.state.fleet.update_queue
         ctx["ha_mode"] = settings.ha_mode
         ctx["ha"] = request.app.state.fleet.ha
         return templates.TemplateResponse(request, name, ctx)
@@ -281,20 +282,32 @@ def create_app(settings: Settings, start_poller: bool = True) -> FastAPI:
         if not wanted:
             return render(request, "message.html", title="Nothing selected",
                           message="No device was selected, so no update was started.", back="/")
+
+        async def starter(host: str) -> tuple[str, str]:
+            st = f.states.get(host)
+            offered = _available_updates(st) if st and st.ok else {}
+            if "stable" not in offered:
+                return "skipped", "no stable update offered any more"
+            return await start_update(f, host, "stable", offered["stable"])
+
         results = []  # (name, host, outcome, detail) for the results table
+        queued = []
         for host in sorted(wanted, key=_ip_key):
             st = f.states.get(host)
             name = st.name if st else host
             offered = _available_updates(st) if st and st.ok else {}
             if host in f.updating:
                 results.append((name, host, "in progress", f"already updating to {f.updating[host].target}"))
+            elif host in f.update_queue:
+                results.append((name, host, "queued", "already waiting for its turn"))
             elif "stable" not in offered:
                 results.append((name, host, "skipped", "no stable update offered any more"))
             else:
-                outcome, detail = await start_update(f, host, "stable", offered["stable"])
-                results.append((name, host, outcome, detail))
-        started = sum(1 for r in results if r[2] == "started")
-        return render(request, "update_results.html", results=results, started=started)
+                queued.append(host)
+                results.append((name, host, "queued", f"stable {offered['stable']}"))
+        f.queue_updates(queued, starter)
+        return render(request, "update_results.html", results=results, started=len(queued),
+                      concurrency=UPDATE_CONCURRENCY)
 
     @app.get("/device/{host}", response_class=HTMLResponse)
     async def device(request: Request, host: str, user: str = Depends(current_user)):

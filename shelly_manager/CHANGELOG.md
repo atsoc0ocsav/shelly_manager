@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.6
+
+- **Update to stable** now queues the selected devices and updates them 2 at a time.
+  Seventeen devices downloading firmware together had almost every download cut short
+  (the device reports `ota_error DATA_LOSS: ZIP flush error : premature end of data` and
+  stays on the old version); 7 at once lost 3 of 7, while 1 or 2 at a time never failed.
+- A queued update that fails is queued once more before it is reported as failed.
+- The overview shows **queued for update** for devices waiting their turn, and leaves them
+  out of the update dialog.
+
 ## 0.5.5
 
 - A firmware update reported as failed is turned into a success as soon as a later poll

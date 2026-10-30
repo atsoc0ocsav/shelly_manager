@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from .collector import DeviceState, collect
 from .devices import DeviceEntry, load_devices, set_password
@@ -18,6 +19,12 @@ log = logging.getLogger(__name__)
 # restart on the old version, or no restart at all within NO_RESTART_S, means failure.
 NO_RESTART_S = 6 * 60
 UPDATE_TIMEOUT_S = 15 * 60  # unreachable this long: give up
+# Bulk updates run this many at a time. 16 devices downloading at once had most downloads cut
+# short (device event "ota_error DATA_LOSS: ZIP flush error : premature end of data",
+# 2026-10-30); 2 at a time never failed, and 7 at once lost 3 of 7.
+UPDATE_CONCURRENCY = 2
+UPDATE_RETRIES = 1          # a failed queued update is queued again this many times
+QUEUE_TICK_S = 2.0
 
 
 @dataclass
@@ -56,6 +63,11 @@ class Fleet:
         self.busy: set[str] = set()
         self.updating: dict[str, UpdateInProgress] = {}
         self.update_results: dict[str, UpdateResult] = {}
+        # Bulk updates waiting for a free slot, in order; host -> retries left.
+        self.update_queue: dict[str, int] = {}
+        self._update_starter = None  # async (host) -> (outcome, detail), supplied by the app
+        self._retries_left: dict[str, int] = {}  # hosts started from the queue
+        self._draining = False
         self._tasks: set[asyncio.Task] = set()
         self.reload()
 
@@ -92,11 +104,19 @@ class Fleet:
     def clear_update(self, host: str) -> None:
         """Forget the in-progress marker and the last result (the user dismissed them)."""
         self.updating.pop(host, None)
+        self.update_queue.pop(host, None)
+        self._retries_left.pop(host, None)
         self.update_results.pop(host, None)
         self.bump()
 
     def _finish_update(self, st: DeviceState, ok: bool, message: str) -> None:
         u = self.updating.pop(st.host)
+        retries = self._retries_left.pop(st.host, 0)
+        if not ok and retries > 0 and self._update_starter:
+            log.warning("firmware update on %s: %s; queued again", st.name, message)
+            self.update_queue[st.host] = retries - 1
+            self._ensure_draining()
+            return
         self.update_results[st.host] = UpdateResult(ok, message, st.polled_at, u.from_version)
         (log.info if ok else log.warning)("firmware update on %s: %s", st.name, message)
 
@@ -191,6 +211,44 @@ class Fleet:
         task = asyncio.create_task(coro)
         self._tasks.add(task)  # keep a reference so the task is not garbage-collected
         task.add_done_callback(self._tasks.discard)
+
+    def queue_updates(self, hosts, starter) -> None:
+        """Update ``hosts`` UPDATE_CONCURRENCY at a time; ``starter(host)`` asks one device to update."""
+        self._update_starter = starter
+        for h in hosts:
+            if h not in self.updating:
+                self.update_queue.setdefault(h, UPDATE_RETRIES)
+                self.update_results.pop(h, None)
+        self.bump()
+        self._ensure_draining()
+
+    def _ensure_draining(self) -> None:
+        if not self._draining and self.update_queue:
+            self._draining = True
+            self._spawn(self._guarded(self._drain_updates()))
+
+    async def _drain_updates(self) -> None:
+        try:
+            while self.update_queue:
+                if len(self.updating) >= UPDATE_CONCURRENCY:
+                    await asyncio.sleep(QUEUE_TICK_S)
+                    continue
+                host = next(iter(self.update_queue))
+                retries = self.update_queue.pop(host)
+                self.bump()
+                if host not in self.entries:
+                    continue
+                outcome, detail = await self._update_starter(host)
+                if host in self.updating:
+                    self._retries_left[host] = retries
+                elif outcome == "failed":
+                    st = self.states.get(host)
+                    self.update_results[host] = UpdateResult(
+                        False, detail, datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        (st.info.get("ver") if st else "") or "")
+                    self.bump()
+        finally:
+            self._draining = False
 
     def start_poll_all(self, reason: str = "manual poll") -> bool:
         """Start a fleet poll in the background; False when one is already running."""

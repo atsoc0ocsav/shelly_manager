@@ -315,19 +315,64 @@ def test_update_marker_clears_when_the_version_changes(client):
     assert "10.0.0.5" not in f.updating
 
 
-def test_update_all_reports_each_device(client, monkeypatch):
-    from shelly_manager.client import ShellyError
+def test_update_all_queues_devices(client, monkeypatch):
     c, st, _ = client
     token = login(c)
     _two_device_fleet(c, st)
-    monkeypatch.setattr(c.app.state.fleet, "start_poll_one", lambda *a, **k: None)
-
-    async def mixed(entry, stage="stable", url=None):
-        if entry.host == "10.0.0.6":
-            raise ShellyError("10.0.0.6: Shelly.Update: -106 Already in progress", code=-106)
-    monkeypatch.setattr(app_mod.ops, "firmware_update", mixed)
+    f = c.app.state.fleet
+    monkeypatch.setattr(f, "_ensure_draining", lambda: None)
     r = c.post("/update-all", data={"csrf": token, "hosts": ["10.0.0.5", "10.0.0.6"]})
-    assert "1 of 2" in r.text and ">started<" in r.text and ">in progress<" in r.text
+    assert "2 of 2" in r.text and ">queued<" in r.text and "2 at a time" in r.text
+    assert list(f.update_queue) == ["10.0.0.5", "10.0.0.6"]
+    assert "queued for update" in c.get("/").text
+
+
+def test_queue_starts_at_most_two_at_a_time(client, monkeypatch):
+    import asyncio
+    import shelly_manager.fleet as fleet_mod
+    c, st, _ = client
+    _two_device_fleet(c, st)
+    f = c.app.state.fleet
+    hosts = ["10.0.0.5", "10.0.0.6"] + [f"10.0.0.{n}" for n in range(7, 10)]
+    for h in hosts[2:]:
+        f.entries[h] = f.entries["10.0.0.5"]
+    monkeypatch.setattr(fleet_mod, "QUEUE_TICK_S", 0.01)
+    peak, started = [0], []
+
+    async def starter(host):
+        f.updating[host] = fleet_mod.UpdateInProgress("stable 2.0.1", "1.7.5", 0.0)
+        started.append(host)
+        peak[0] = max(peak[0], len(f.updating))
+
+        async def finish():
+            await asyncio.sleep(0.05)
+            f.updating.pop(host, None)
+        asyncio.get_running_loop().create_task(finish())
+        return "started", ""
+
+    async def scenario():
+        f._update_starter = starter
+        f.update_queue.update({h: 0 for h in hosts})
+        await f._drain_updates()
+
+    asyncio.run(scenario())
+    assert started == hosts and peak[0] == fleet_mod.UPDATE_CONCURRENCY == 2
+
+
+def test_failed_queued_update_is_retried_once(client, monkeypatch):
+    c, st, _ = client
+    f = c.app.state.fleet
+    monkeypatch.setattr(f, "_ensure_draining", lambda: None)
+    f._update_starter = object()
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    f._retries_left["10.0.0.5"] = 1
+    f._record(_poll_result(st, "1.7.5", 40), "poll")     # restarted on the old version: failed
+    assert f.update_queue == {"10.0.0.5": 0} and "10.0.0.5" not in f.update_results
+    f.update_queue.clear()
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    f._retries_left["10.0.0.5"] = 0
+    f._record(_poll_result(st, "1.7.5", 30), "poll")
+    assert not f.update_queue and not f.update_results["10.0.0.5"].ok
 
 
 def _poll_result(st, ver, uptime, ok=True):
