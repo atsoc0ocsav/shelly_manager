@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.4
+
+- Config backup pushes no longer race each other. After a firmware update every device
+  is re-polled, and each poll pushed at the same time; the losing pushes were rejected by
+  GitHub ("cannot lock ref") even though the winning one had already uploaded everything.
+  Pushes now run one at a time.
+- A push failure is cleared as soon as the remote holds the latest commit, instead of
+  staying on the overview until the next config change.
+- A rejection caused by a concurrent update is no longer reported as "the repository
+  already has other history". That hint is now shown only for a real non-fast-forward.
+
 ## 0.5.3
 
 - A failed firmware update no longer leaves the device stuck on "Updating to ...". Shelly

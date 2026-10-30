@@ -140,6 +140,43 @@ def test_push_permission_denied_hint(tmp_path, monkeypatch):
     assert st.ok is False and "deploy key is not accepted" in st.message
 
 
+def test_concurrent_pushes_do_not_race(tmp_path):
+    import threading
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    s = SnapshotStore(tmp_path / "snap", remote=str(remote))
+    s.save("dev-1", {"a": 1}, "first")
+    s.push()
+    s.save("dev-1", {"a": 2}, "second")
+    results = []
+    threads = [threading.Thread(target=lambda: results.append((s.push().ok, s.push_status.message)))
+               for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert all(ok for ok, _ in results), results
+    assert s.push_status.ok is True
+
+
+def test_failure_clears_once_remote_has_head(tmp_path, monkeypatch):
+    s = _store_with_commit(tmp_path)
+    monkeypatch.setattr(s, "_try_push", lambda via_443: "! [remote rejected] main -> main (cannot lock ref 'refs/heads/main')")
+    assert s.push().ok is False
+    monkeypatch.setattr(s, "unpushed", lambda: False)  # the commit reached the remote through another push
+    st = s.push()
+    assert st.ok is True and st.message == "up to date"
+
+
+def test_ref_race_and_other_history_hints(tmp_path, monkeypatch):
+    s = _store_with_commit(tmp_path)
+    monkeypatch.setattr(s, "_try_push", lambda via_443: "! [remote rejected] main -> main (cannot lock ref 'refs/heads/main': is at a but expected b)")
+    st = s.push()
+    assert "another push at the same moment" in st.message and "other history" not in st.message
+    monkeypatch.setattr(s, "_try_push", lambda via_443: "! [rejected] main -> main (fetch first)")
+    assert "other history" in s.push().message
+
+
 def test_ssh_command_has_connect_timeout(tmp_path):
     s = SnapshotStore(tmp_path / "snap", remote="git@github.com:me/cfg.git", ssh_key_file=tmp_path / "k")
     cmd = s._env["GIT_SSH_COMMAND"]

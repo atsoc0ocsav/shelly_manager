@@ -7,6 +7,7 @@ import re
 import shlex
 import socket
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,6 +98,9 @@ class SnapshotStore:
             )
         self._env["GIT_SSH_COMMAND"] = self._ssh_base
         self._via_443 = False  # sticky once port 22 proved unreachable and 443 worked
+        # Polls push from worker threads; two concurrent pushes of the same branch race on
+        # the remote ref and the loser is rejected, so pushes run one at a time.
+        self._push_lock = threading.Lock()
         self.remote = remote
         if remote:
             remotes = self._git("remote").split()
@@ -124,10 +128,14 @@ class SnapshotStore:
         st = self.push_status
         if not st.configured:
             return st
+        with self._push_lock:
+            return self._push_locked(st)
+
+    def _push_locked(self, st: PushStatus) -> PushStatus:
         st.last_attempt = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not self.unpushed():
-            if st.ok is not False:  # keep a failure visible until a push succeeds
-                st.ok, st.message = True, "up to date"
+            # origin/main is our HEAD, so the remote holds everything: any earlier failure is resolved.
+            st.ok, st.message = True, "up to date"
             return st
         target = remote_host(self.remote or "")
         fallback = SSH_443_FALLBACK.get(target[0]) if target and target[1] == 22 else None
@@ -173,7 +181,9 @@ class SnapshotStore:
                 return " (the deploy key is not accepted: add it to the repository with write access)"
             if "Repository not found" in err or "does not appear to be a git repository" in err:
                 return " (check the repository URL, and that the deploy key is added to that repository)"
-            if "rejected" in err or "fetch first" in err:
+            if "cannot lock ref" in err or "incorrect old value" in err:
+                return " (the branch was updated by another push at the same moment; retried on the next poll)"
+            if "fetch first" in err or "non-fast-forward" in err:
                 return " (the repository already has other history: use an empty repository)"
             return ""
         host, port = target
