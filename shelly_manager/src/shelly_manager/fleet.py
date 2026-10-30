@@ -33,6 +33,7 @@ class UpdateResult:
     ok: bool
     message: str
     at: str            # ISO time, UTC
+    from_version: str = ""  # version when the update was started; lets a late success clear a failure
 
 
 def _uptime(st: DeviceState | None) -> int | None:
@@ -95,8 +96,8 @@ class Fleet:
         self.bump()
 
     def _finish_update(self, st: DeviceState, ok: bool, message: str) -> None:
-        del self.updating[st.host]
-        self.update_results[st.host] = UpdateResult(ok, message, st.polled_at)
+        u = self.updating.pop(st.host)
+        self.update_results[st.host] = UpdateResult(ok, message, st.polled_at, u.from_version)
         (log.info if ok else log.warning)("firmware update on %s: %s", st.name, message)
 
     def _settle_update(self, st: DeviceState) -> None:
@@ -123,9 +124,22 @@ class Fleet:
                                            f"started and still on {ver}: the update most likely failed "
                                            "(the device reports the reason only as a live event)")
 
+    def _supersede_failure(self, st: DeviceState) -> None:
+        """A failed update that later went through (slow download, or installed from elsewhere) is a success."""
+        r = self.update_results.get(st.host)
+        if not r or r.ok or st.host in self.updating or not st.ok:
+            return
+        ver = st.info.get("ver") or ""
+        if ver and r.from_version and ver != r.from_version:
+            self.update_results[st.host] = UpdateResult(
+                True, f"updated from {r.from_version} to {ver} after the earlier attempt was reported as failed",
+                st.polled_at, r.from_version)
+            log.info("firmware update on %s: now on %s, clearing the earlier failure", st.name, ver)
+
     def _record(self, st: DeviceState, reason: str) -> None:
         self.states[st.host] = st
         self._settle_update(st)
+        self._supersede_failure(st)
         if st.ok:
             if self.store.save(st.device_id, st.snapshot, reason):
                 log.info("config changed: %s (%s)", st.name, reason)

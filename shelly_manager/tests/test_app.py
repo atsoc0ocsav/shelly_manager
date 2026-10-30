@@ -363,6 +363,25 @@ def test_update_failure_detected_when_no_restart(client, monkeypatch):
     assert "most likely failed" in f.update_results["10.0.0.5"].message
 
 
+def test_late_success_clears_the_failure(client, monkeypatch):
+    import shelly_manager.fleet as fleet_mod
+    c, st, _ = client
+    f = c.app.state.fleet
+    f.mark_updating("10.0.0.5", "stable 2.0.1")
+    late = f.updating["10.0.0.5"].started + fleet_mod.NO_RESTART_S + 1
+    monkeypatch.setattr(fleet_mod.time, "monotonic", lambda: late)
+    f._record(_poll_result(st, "1.7.5", 7700), "poll")
+    assert not f.update_results["10.0.0.5"].ok
+    login(c)
+    assert "update failed" in c.get("/").text
+    f._record(_poll_result(st, "2.0.1", 60), "poll")     # the update went through later
+    r = f.update_results["10.0.0.5"]
+    assert r.ok and "1.7.5 to 2.0.1" in r.message
+    assert "update failed" not in c.get("/").text
+    f._record(_poll_result(st, "2.0.1", 120), "poll")    # stays a success on later polls
+    assert f.update_results["10.0.0.5"].ok
+
+
 def test_update_success_recorded(client):
     c, st, _ = client
     f = c.app.state.fleet

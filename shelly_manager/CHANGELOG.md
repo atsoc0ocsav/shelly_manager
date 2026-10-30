@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.5
+
+- A firmware update reported as failed is turned into a success as soon as a later poll
+  sees the device on a new version (a slow download that finished after the 6-minute
+  verdict, or an update installed from elsewhere). The overview no longer shows
+  "update failed" next to "latest stable".
+
 ## 0.5.4
 
 - Config backup pushes no longer race each other. After a firmware update every device
