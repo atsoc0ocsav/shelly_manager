@@ -196,3 +196,79 @@ def test_httpx_request_logs_are_quiet_by_default():
     import logging
     import shelly_manager.client  # noqa: F401  (sets the levels on import)
     assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+
+def _device_transport(check_for_update):
+    """A fake Gen2 device; ``check_for_update(request)`` answers Shelly.CheckForUpdate."""
+    import json
+
+    import httpx
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = json.loads(request.content)["method"]
+        seen[method] = request.extensions.get("timeout", {}).get("read")
+        if method == "Shelly.CheckForUpdate":
+            return check_for_update(request)
+        result = {
+            "Shelly.GetDeviceInfo": {"id": "shellyplus1-aa", "name": "Dev", "ver": "1.0.0", "gen": 2},
+            "Shelly.GetConfig": {"sys": {"cfg_rev": 3}},
+            "Shelly.GetStatus": {"sys": {"uptime": 10, "available_updates": {"stable": {"version": "1.1.0"}}}},
+            "Shelly.ListMethods": {"methods": ["Shelly.GetConfig"]},
+            "Script.List": {"scripts": []},
+        }.get(method, {})
+        return httpx.Response(200, json={"id": 1, "result": result})
+
+    return httpx.MockTransport(handler), seen
+
+
+async def test_slow_check_for_update_does_not_fail_the_poll():
+    import httpx
+
+    from shelly_manager.collector import collect
+    from shelly_manager.devices import DeviceEntry
+
+    def timeout(request):
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    transport, _ = _device_transport(timeout)
+    st = await collect(DeviceEntry(url="http://10.0.0.9"), transport=transport)
+    assert st.ok, st.error
+    assert st.updates["stable"] == {"version": "1.1.0"}  # fell back to sys.available_updates
+    assert "ReadTimeout" in st.updates["_unavailable"]
+    assert st.snapshot["config"] == {"sys": {}}
+
+
+async def test_check_for_update_gets_its_own_longer_timeout():
+    import httpx
+
+    from shelly_manager.collector import CHECK_FOR_UPDATE_TIMEOUT_S, collect
+    from shelly_manager.devices import DeviceEntry
+
+    transport, seen = _device_transport(
+        lambda r: httpx.Response(200, json={"id": 1, "result": {"stable": {"version": "1.2.0"}}}))
+    st = await collect(DeviceEntry(url="http://10.0.0.9"), transport=transport)
+    assert st.ok and st.updates == {"stable": {"version": "1.2.0"}}
+    assert seen["Shelly.CheckForUpdate"] == CHECK_FOR_UPDATE_TIMEOUT_S
+    assert seen["Shelly.GetConfig"] == 8.0
+
+
+def test_poll_failures_are_logged_on_transition_only(tmp_path, caplog):
+    import logging
+
+    from shelly_manager.collector import DeviceState
+    from shelly_manager.fleet import Fleet
+
+    devices = tmp_path / "devices.txt"
+    devices.write_text("http://10.0.0.9 pw\n")
+    f = Fleet(devices, SnapshotStore(tmp_path / "snap"))
+    bad = lambda: DeviceState(host="10.0.0.9", url="http://10.0.0.9", error="10.0.0.9: ReadTimeout")
+    good = DeviceState(host="10.0.0.9", url="http://10.0.0.9", ok=True, info={"id": "d1", "name": "Dev"})
+    with caplog.at_level(logging.INFO, logger="shelly_manager.fleet"):
+        f._record(bad(), "poll")
+        f._record(bad(), "poll")
+        f._record(good, "poll")
+    msgs = [r.getMessage() for r in caplog.records if r.name == "shelly_manager.fleet"]
+    assert msgs.count("poll failed: 10.0.0.9: ReadTimeout") == 1
+    assert "poll recovered: Dev (10.0.0.9)" in msgs

@@ -32,10 +32,12 @@ class ShellyUnreachable(RuntimeError):
 
 
 class ShellyClient:
-    def __init__(self, entry: DeviceEntry, timeout: float = 8.0):
+    def __init__(self, entry: DeviceEntry, timeout: float = 8.0,
+                 transport: httpx.AsyncBaseTransport | None = None):
         auth = httpx.DigestAuth("admin", entry.password) if entry.password else None
         self.entry = entry
-        self._http = httpx.AsyncClient(base_url=entry.url, auth=auth, timeout=timeout)
+        self._http = httpx.AsyncClient(base_url=entry.url, auth=auth, timeout=timeout,
+                                       transport=transport)
         self._id = 0
 
     async def __aenter__(self) -> "ShellyClient":
@@ -53,13 +55,16 @@ class ShellyClient:
         r.raise_for_status()
         return r.json()
 
-    async def rpc(self, method: str, params: dict[str, Any] | None = None) -> Any:
+    async def rpc(self, method: str, params: dict[str, Any] | None = None,
+                  timeout: float | None = None) -> Any:
+        """``timeout`` overrides the client's timeout for this call only."""
         self._id += 1
         body: dict[str, Any] = {"id": self._id, "method": method}
         if params:
             body["params"] = params
+        extra = {"timeout": timeout} if timeout is not None else {}
         try:
-            r = await self._http.post("/rpc", json=body)
+            r = await self._http.post("/rpc", json=body, **extra)
         except httpx.HTTPError as e:
             raise ShellyUnreachable(f"{self.entry.host}: {type(e).__name__}") from e
         if r.status_code == 401:

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.7
+
+- Devices no longer all show **unreachable: ReadTimeout** when Shelly's update server is
+  slow. `Shelly.CheckForUpdate` makes the device ask that server before answering, and it
+  took 5 to 15 s per device (every other call takes about 1 s), so the 8 s request timeout
+  failed the whole poll for all 17 devices while Home Assistant still reached them.
+  That call now has its own 30 s timeout, and if it still fails the poll succeeds and the
+  offered versions come from the device's own `sys.available_updates`.
+- A device poll that fails is now logged (`poll failed: <host>: <reason>`), once per change
+  of reason, and so is its recovery. Before, failures were shown only on the overview.
+
 ## 0.5.6
 
 - **Update to stable** now queues the selected devices and updates them 2 at a time.

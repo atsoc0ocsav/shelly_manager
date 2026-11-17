@@ -157,7 +157,14 @@ class Fleet:
             log.info("firmware update on %s: now on %s, clearing the earlier failure", st.name, ver)
 
     def _record(self, st: DeviceState, reason: str) -> None:
+        prev = self.states.get(st.host)
         self.states[st.host] = st
+        # Log transitions only, so a fleet that stays unreachable does not flood the log
+        # every poll, while the app log still says when and why polling started failing.
+        if not st.ok and (prev is None or prev.ok or prev.error != st.error):
+            log.warning("poll failed: %s", st.error)
+        elif st.ok and prev is not None and not prev.ok:
+            log.info("poll recovered: %s (%s)", st.name, st.host)
         self._settle_update(st)
         self._supersede_failure(st)
         if st.ok:
